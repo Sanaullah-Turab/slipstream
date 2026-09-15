@@ -22,15 +22,32 @@ Slipstream trains agents to race, overtake, and defend on a lightweight 2D track
 
 ```
 slipstream/
-|-- configs/              # Versioned YAML experiment configs
+|-- requirements.txt
+|-- configs/
+|   |-- env_config.yaml       # Environment parameters
+|   `-- ppo_config.yaml       # PPO hyperparameters
 |-- src/
-|   |-- env/              # Track geometry, Gymnasium env, PettingZoo wrapper, rewards
-|   |-- training/         # Training entry points and callbacks
-|   |-- evaluation/       # Fixed-seed evaluation and replay recording
-|   `-- utils/            # Config loader
-|-- tests/                # pytest coverage for env, rewards, and multi-agent logic
-|-- scripts/              # Colab training notebook
-`-- notebooks/            # Exploration only, not production code
+|   |-- env/
+|   |   |-- track.py              # Track geometry and reference path
+|   |   |-- racing_env.py         # Gymnasium single-agent API
+|   |   |-- multi_racing_env.py   # PettingZoo multi-agent wrapper
+|   |   `-- rewards.py            # All reward components, isolated for testing
+|   |-- training/
+|   |   |-- train_single.py       # Single-agent PPO entry point
+|   |   |-- train_multi.py        # Multi-agent PPO entry point
+|   |   `-- callbacks.py          # Checkpointing and logging callbacks
+|   |-- evaluation/
+|   |   |-- evaluate.py           # Fixed-seed evaluation runner
+|   |   `-- replay_recorder.py    # Episode recording for demos
+|   `-- utils/
+|       `-- config.py             # YAML config loader
+|-- tests/
+|   |-- test_env.py               # Environment reset, step, shapes, determinism
+|   |-- test_rewards.py           # Reward signs, scales, and edge cases
+|   `-- test_multi_env.py         # Multi-agent stepping and termination
+|-- notebooks/                    # Exploration only, not production code
+`-- scripts/
+    `-- colab_train.ipynb         # Cloud training notebook
 ```
 
 ---
