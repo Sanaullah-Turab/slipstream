@@ -1,21 +1,26 @@
 import numpy as np
 from scipy.interpolate import splprep, splev
 
-TRACK_WIDTH = 72.0
-N_SAMPLES = 600
+TRACK_WIDTH = 65.0
+N_SAMPLES = 800
 RAY_ANGLES = np.deg2rad([-90.0, -45.0, 0.0, 45.0, 90.0])
 
+# F1-inspired circuit: main straight → T1 right complex → fast sweep → chicane → left hairpin
 _CONTROL_POINTS = np.array([
-    [400,  70],
-    [620, 100],
-    [720, 240],
-    [720, 380],
-    [620, 510],
-    [400, 540],
-    [180, 510],
-    [ 80, 380],
-    [ 80, 240],
-    [180, 100],
+    [190, 490],  # start/finish
+    [560, 490],
+    [660, 455],  # T1
+    [720, 360],
+    [700, 255],
+    [620, 170],  # fast sweep
+    [480, 115],
+    [360, 110],  # top straight
+    [265, 145],  # chicane
+    [235, 210],
+    [200, 290],
+    [105, 360],  # left hairpin
+    [ 90, 425],
+    [135, 472],
 ], dtype=float)
 
 
@@ -54,7 +59,6 @@ class Track:
         def _segs(pts: np.ndarray) -> np.ndarray:
             return np.stack([pts, np.roll(pts, -1, axis=0)], axis=1)
 
-        # All wall segments: shape (2*N, 2, 2)
         self._wall_segs: np.ndarray = np.concatenate(
             [_segs(self.inner), _segs(self.outer)], axis=0
         )

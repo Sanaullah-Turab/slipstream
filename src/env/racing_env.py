@@ -138,12 +138,12 @@ class RacingEnv(gym.Env):
             self._clock = pygame.time.Clock()
 
         surf = self._screen
-        surf.fill((28, 38, 22))  # grass
+        surf.fill((28, 38, 22))
 
         outer = [(int(x), int(y)) for x, y in self.track.outer]
         inner = [(int(x), int(y)) for x, y in self.track.inner]
-        pygame.draw.polygon(surf, (52, 52, 52), outer)    # asphalt
-        pygame.draw.polygon(surf, (28, 38, 22), inner)    # infield
+        pygame.draw.polygon(surf, (52, 52, 52), outer)
+        pygame.draw.polygon(surf, (28, 38, 22), inner)
         pygame.draw.lines(surf, (210, 210, 210), True, outer, 2)
         pygame.draw.lines(surf, (210, 210, 210), True, inner, 2)
 
