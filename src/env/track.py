@@ -7,21 +7,22 @@ RAY_ANGLES = np.deg2rad([-90.0, -45.0, 0.0, 45.0, 90.0])
 
 # F1-inspired circuit: main straight → T1 right complex → fast sweep → chicane → left hairpin
 _CONTROL_POINTS = np.array([
-    [190, 490],  # start/finish
-    [560, 490],
-    [660, 455],  # T1
-    [720, 360],
-    [700, 255],
-    [620, 170],  # fast sweep
-    [480, 115],
-    [360, 110],  # top straight
-    [265, 145],  # chicane
-    [235, 210],
-    [200, 290],
-    [105, 360],  # left hairpin
-    [ 90, 425],
-    [135, 472],
+    [200, 530],  # Main straight
+    [600, 530],
+    [720, 480],  # T1 right
+    [720, 380],  # T2
+    [450, 380],  # Infield straight (left)
+    [350, 320],  # Infield hairpin (right)
+    [450, 220],  # Diagonal up-right
+    [650, 180],  # T4 sweeping right
+    [650, 100],  # T5 right
+    [450,  80],  # Top straight (left)
+    [250, 120],  # Fast sweep left
+    [150, 250],
+    [ 80, 380],  # Tightening left curve
+    [120, 480],  # Back onto main straight
 ], dtype=float)
+
 
 
 class Track:
