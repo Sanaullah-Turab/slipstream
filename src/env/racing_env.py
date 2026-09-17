@@ -7,6 +7,7 @@ import gymnasium as gym
 from gymnasium import spaces
 
 from .track import Track, RAY_ANGLES
+from .rewards import compute_reward, AgentState
 
 # --- Physics ---
 DT = 0.05           # seconds per step
@@ -46,6 +47,7 @@ class RacingEnv(gym.Env):
         self._progress = 0.0
         self._lateral = 0.0
         self._track_heading = 0.0
+        self._arc_length = 0.0
 
         self._screen = None
         self._clock = None
@@ -59,14 +61,28 @@ class RacingEnv(gym.Env):
         self._speed = 0.0
         self._step_count = 0
         self._laps = 0
-        self._progress, self._lateral, self._track_heading, _ = (
-            self.track.get_track_state(self._pos)
-        )
+        ts = self.track.get_track_state(self._pos)
+        self._progress = ts.progress
+        self._lateral = ts.lateral
+        self._track_heading = ts.track_heading
+        self._arc_length = ts.arc_length
         return self._build_obs(), {}
 
     def step(self, action: np.ndarray):
         steer = float(np.clip(action[0], -1.0, 1.0))
         throttle = float(np.clip(action[1], -1.0, 1.0))
+
+        prev_state = AgentState(
+            pos=self._pos.copy(),
+            heading=self._heading,
+            speed=self._speed,
+            progress=self._progress,
+            lateral=self._lateral,
+            track_heading=self._track_heading,
+            on_track=True,
+            laps=self._laps,
+            arc_length=self._arc_length,
+        )
 
         self._heading += steer * MAX_STEER * DT
         self._speed = float(np.clip(
@@ -77,15 +93,30 @@ class RacingEnv(gym.Env):
         self._pos[1] += self._speed * np.sin(self._heading) * DT
         self._step_count += 1
 
-        prev_progress = self._progress
-        self._progress, self._lateral, self._track_heading, on_track = (
-            self.track.get_track_state(self._pos)
-        )
+        ts = self.track.get_track_state(self._pos)
+        self._progress = ts.progress
+        self._lateral = ts.lateral
+        self._track_heading = ts.track_heading
 
-        if self._progress - prev_progress < -0.5:
+        if self._progress - prev_state.progress < -0.5:
             self._laps += 1
 
-        terminated = not on_track
+        self._arc_length = ts.arc_length
+
+        curr_state = AgentState(
+            pos=self._pos.copy(),
+            heading=self._heading,
+            speed=self._speed,
+            progress=self._progress,
+            lateral=self._lateral,
+            track_heading=self._track_heading,
+            on_track=ts.on_track,
+            laps=self._laps,
+            arc_length=self._arc_length,
+        )
+
+        reward = compute_reward(curr_state, prev_state, self.track)
+        terminated = not ts.on_track
         truncated = self._step_count >= MAX_STEPS
 
         if self.render_mode == "human":
@@ -93,7 +124,7 @@ class RacingEnv(gym.Env):
 
         return (
             self._build_obs(),
-            0.0,
+            reward,
             terminated,
             truncated,
             {"laps": self._laps, "progress": self._progress, "speed": self._speed},
