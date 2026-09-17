@@ -1,3 +1,5 @@
+"""Unit tests for src/env/rewards.py. No RacingEnv is instantiated."""
+
 import numpy as np
 import pytest
 
