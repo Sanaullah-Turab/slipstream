@@ -1,3 +1,5 @@
+from typing import NamedTuple
+
 import numpy as np
 from scipy.interpolate import splprep, splev
 
@@ -23,6 +25,14 @@ _CONTROL_POINTS = np.array([
     [120, 480],  # Back onto main straight
 ], dtype=float)
 
+
+
+class TrackState(NamedTuple):
+    progress: float
+    lateral: float
+    track_heading: float
+    on_track: bool
+    arc_length: float
 
 
 class Track:
@@ -67,8 +77,7 @@ class Track:
     def nearest_idx(self, pos: np.ndarray) -> int:
         return int(np.argmin(np.linalg.norm(self.centerline - pos, axis=1)))
 
-    def get_track_state(self, pos: np.ndarray) -> tuple:
-        """Single nearest-point lookup returning (progress, lateral, track_heading, on_track)."""
+    def get_track_state(self, pos: np.ndarray) -> TrackState:
         idx = self.nearest_idx(pos)
         delta = pos - self.centerline[idx]
         lateral = float(np.dot(delta, self.normals[idx]))
@@ -76,7 +85,7 @@ class Track:
         progress = (arc % self.total_length) / self.total_length
         heading = float(np.arctan2(self.tangents[idx, 1], self.tangents[idx, 0]))
         on_track = abs(lateral) <= self.half_width
-        return progress, lateral, heading, on_track
+        return TrackState(progress, lateral, heading, on_track, arc)
 
     def ray_distances(
         self, pos: np.ndarray, heading: float, max_dist: float = 200.0
