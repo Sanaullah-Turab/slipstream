@@ -65,7 +65,7 @@ pip install -r requirements.txt
 ## Running Tests
 
 ```bash
-pytest tests/
+.venv/bin/pytest tests/
 ```
 
 ---
@@ -89,8 +89,8 @@ For GPU runs, use `scripts/colab_train.ipynb` on Google Colab or Kaggle.
 ## Roadmap
 
 - [x] Project scaffold and repository setup
-- [ ] Track + Gymnasium environment with Pygame rendering
-- [ ] Reward system with isolated unit tests
+- [x] Track + Gymnasium environment with Pygame rendering
+- [x] Reward system with isolated unit tests
 - [ ] Single-agent PPO baseline
 - [ ] PettingZoo multi-agent wrapper
 - [ ] Competitive training with interaction-aware rewards
