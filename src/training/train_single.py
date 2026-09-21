@@ -8,6 +8,7 @@ import numpy as np
 import torch
 import wandb
 from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.monitor import Monitor
 
 from src.env.racing_env import RacingEnv
@@ -48,7 +49,7 @@ def main() -> None:
     policy = ppo_cfg.pop("policy")
     model = PPO(policy, env, **ppo_cfg, seed=seed, verbose=1, tensorboard_log=None)
 
-    callbacks = [
+    callbacks: list[BaseCallback] = [
         CheckpointCallback(
             save_freq=train_cfg["checkpoint_freq"],
             save_dir=train_cfg["checkpoint_dir"],
