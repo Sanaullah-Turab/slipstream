@@ -81,7 +81,13 @@ class WandbEvalCallback(BaseCallback):
             }
 
             name_to_val = self.logger.name_to_value
-            for key in ("train/policy_gradient_loss", "train/value_loss", "train/entropy_loss"):
+            for key in (
+                "train/policy_gradient_loss",
+                "train/value_loss",
+                "train/entropy_loss",
+                "rollout/ep_rew_mean",
+                "rollout/ep_len_mean",
+            ):
                 if key in name_to_val:
                     logs[key] = name_to_val[key]
 
