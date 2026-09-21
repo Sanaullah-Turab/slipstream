@@ -66,7 +66,7 @@ class WandbEvalCallback(BaseCallback):
                 while not done:
                     action, _ = self.model.predict(obs, deterministic=True)
                     obs, reward, terminated, truncated, info = self._eval_env.step(action)
-                    ep_reward += reward
+                    ep_reward += float(reward)
                     ep_len += 1
                     last_info = info
                     done = terminated or truncated
