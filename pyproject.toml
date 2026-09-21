@@ -10,3 +10,9 @@ requires-python = ">=3.12"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["src*"]
+
+[tool.pyrefly]
+search_path = ["."]
+
+[tool.pyright]
+extraPaths = ["."]
