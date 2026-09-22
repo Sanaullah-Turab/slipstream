@@ -95,4 +95,4 @@ For GPU runs, use `scripts/colab_train.ipynb` on Google Colab or Kaggle.
 - [x] Kinematic bicycle model car physics
 - [ ] PettingZoo multi-agent wrapper
 - [ ] Competitive training with interaction-aware rewards
-- [ ] Evaluation suite, replay recording.
+- [ ] Evaluation suite, replay recording, and final report
