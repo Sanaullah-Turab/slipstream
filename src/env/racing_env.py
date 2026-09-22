@@ -8,18 +8,14 @@ from gymnasium import spaces
 
 from .track import Track, RAY_ANGLES
 from .rewards import compute_reward, AgentState
+from .car import CarState, DEFAULT_PARAMS, DT, MAX_SPEED, step_physics
 
-# --- Physics ---
-DT = 0.05           # seconds per step
-MAX_SPEED = 150.0   # units/s  (equilibrium: ACCEL / DRAG)
-ACCEL = 120.0       # units/s²
-DRAG = 0.8          # drag coefficient; v_dot = throttle*ACCEL - DRAG*v
-MAX_STEER = 2.5     # rad/s at max steering input
 MAX_STEPS = 2000
+MAX_HEADING_RATE = 2.0
 
 # --- Observation ---
 MAX_RAY_DIST = 250.0
-_OBS_DIM = 10  # speed | sin_err cos_err | lateral | progress | 5 rays
+_OBS_DIM = 11  # speed | sin_err cos_err | lateral | progress | heading_rate | 5 rays
 
 
 class RacingEnv(gym.Env):
@@ -34,8 +30,8 @@ class RacingEnv(gym.Env):
             low=-1.0, high=1.0, shape=(_OBS_DIM,), dtype=np.float32
         )
         self.action_space = spaces.Box(
-            low=np.float32([-1.0, -1.0]),
-            high=np.float32([1.0, 1.0]),
+            low=np.array([-1.0, -1.0], dtype=np.float32),
+            high=np.array([1.0, 1.0], dtype=np.float32),
             dtype=np.float32,
         )
 
@@ -48,6 +44,7 @@ class RacingEnv(gym.Env):
         self._lateral = 0.0
         self._track_heading = 0.0
         self._arc_length = 0.0
+        self._heading_rate = 0.0
 
         self._screen = None
         self._clock = None
@@ -61,6 +58,7 @@ class RacingEnv(gym.Env):
         self._speed = 0.0
         self._step_count = 0
         self._laps = 0
+        self._heading_rate = 0.0
         ts = self.track.get_track_state(self._pos)
         self._progress = ts.progress
         self._lateral = ts.lateral
@@ -84,13 +82,11 @@ class RacingEnv(gym.Env):
             arc_length=self._arc_length,
         )
 
-        self._heading += steer * MAX_STEER * DT
-        self._speed = float(np.clip(
-            self._speed * (1.0 - DRAG * DT) + throttle * ACCEL * DT,
-            0.0, MAX_SPEED,
-        ))
-        self._pos[0] += self._speed * np.cos(self._heading) * DT
-        self._pos[1] += self._speed * np.sin(self._heading) * DT
+        car = CarState(x=self._pos[0], y=self._pos[1], heading=self._heading, speed=self._speed)
+        car, self._heading_rate = step_physics(car, throttle, steer, DEFAULT_PARAMS, DT)
+        self._pos[:] = car.x, car.y
+        self._heading = car.heading
+        self._speed = car.speed
         self._step_count += 1
 
         ts = self.track.get_track_state(self._pos)
@@ -144,6 +140,7 @@ class RacingEnv(gym.Env):
                 np.cos(heading_err),
                 lateral_norm,
                 self._progress,
+                float(np.clip(self._heading_rate / MAX_HEADING_RATE, -1.0, 1.0)),
                 *np.clip(rays, 0.0, 1.0),
             ],
             dtype=np.float32,
@@ -217,6 +214,7 @@ class RacingEnv(gym.Env):
         font = pygame.font.SysFont("monospace", 14)
         for i, text in enumerate([
             f"Speed:    {self._speed:6.1f}",
+            f"HeadRate: {self._heading_rate:+.2f}",
             f"Progress: {self._progress:.3f}",
             f"Laps:     {self._laps}",
             f"Step:     {self._step_count}",
@@ -226,6 +224,7 @@ class RacingEnv(gym.Env):
         if self.render_mode == "human":
             pygame.event.pump()
             pygame.display.flip()
+            assert self._clock is not None
             self._clock.tick(self.metadata["render_fps"])
             return None
 

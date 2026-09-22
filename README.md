@@ -92,6 +92,7 @@ For GPU runs, use `scripts/colab_train.ipynb` on Google Colab or Kaggle.
 - [x] Track + Gymnasium environment with Pygame rendering
 - [x] Reward system with isolated unit tests
 - [x] Single-agent PPO baseline
+- [x] Kinematic bicycle model car physics
 - [ ] PettingZoo multi-agent wrapper
 - [ ] Competitive training with interaction-aware rewards
 - [ ] Evaluation suite, replay recording, and final report
