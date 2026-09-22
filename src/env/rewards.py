@@ -5,8 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .track import Track
-
-MAX_SPEED = 150.0
+from .car import MAX_SPEED
 
 
 @dataclass
