@@ -30,8 +30,8 @@ class RacingEnv(gym.Env):
             low=-1.0, high=1.0, shape=(_OBS_DIM,), dtype=np.float32
         )
         self.action_space = spaces.Box(
-            low=np.float32([-1.0, -1.0]),
-            high=np.float32([1.0, 1.0]),
+            low=np.array([-1.0, -1.0], dtype=np.float32),
+            high=np.array([1.0, 1.0], dtype=np.float32),
             dtype=np.float32,
         )
 
@@ -224,6 +224,7 @@ class RacingEnv(gym.Env):
         if self.render_mode == "human":
             pygame.event.pump()
             pygame.display.flip()
+            assert self._clock is not None
             self._clock.tick(self.metadata["render_fps"])
             return None
 
