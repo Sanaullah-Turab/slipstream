@@ -22,4 +22,6 @@ train:
   eval_freq: 25_000
   eval_episodes: 5
   checkpoint_dir: checkpoints/single
-  run_name: slipstream-single-v1
+  run_name: slipstream-single-v3
+  group: single-agent
+  tags: [bicycle-physics, wall-zone]

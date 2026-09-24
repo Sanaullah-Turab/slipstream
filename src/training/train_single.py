@@ -12,8 +12,19 @@ from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.monitor import Monitor
 
 from src.env.racing_env import RacingEnv
+from src.env.rewards import WALL_ZONE
 from src.training.callbacks import CheckpointCallback, WandbEvalCallback
 from src.utils.config import load_config
+
+
+def _git_short_sha() -> str:
+    try:
+        import subprocess
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], text=True
+        ).strip()
+    except Exception:
+        return "unknown"
 
 
 def _seed_everything(seed: int) -> None:
@@ -37,10 +48,13 @@ def main() -> None:
     seed = train_cfg["seed"]
     _seed_everything(seed)
 
+    sha = _git_short_sha()
     wandb.init(
         project="slipstream",
-        name=train_cfg["run_name"],
-        config=cfg,
+        name=f"{train_cfg['run_name']}-{sha}",
+        group=train_cfg.get("group", "single-agent"),
+        tags=train_cfg.get("tags", []),
+        config={**cfg, "env_constants": {"WALL_ZONE": WALL_ZONE}},
         mode="disabled" if args.no_wandb else "online",
     )
 
