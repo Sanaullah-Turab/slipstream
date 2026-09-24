@@ -20,11 +20,15 @@ from src.utils.config import load_config
 def _git_short_sha() -> str:
     try:
         import subprocess
-        return subprocess.check_output(
+        sha = subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"], text=True
         ).strip()
+        dirty = subprocess.check_output(
+            ["git", "status", "--porcelain"], text=True
+        ).strip()
+        return f"{sha}-dirty" if dirty else sha
     except Exception:
-        return "unknown"
+        return "nogit"
 
 
 def _seed_everything(seed: int) -> None:
