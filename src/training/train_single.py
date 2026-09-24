@@ -91,6 +91,7 @@ def main() -> None:
         WandbEvalCallback(
             eval_freq=train_cfg["eval_freq"],
             n_episodes=train_cfg["eval_episodes"],
+            save_best_path=str(ckpt_dir),
         ),
     ]
 

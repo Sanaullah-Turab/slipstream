@@ -48,10 +48,12 @@ class CheckpointCallback(BaseCallback):
 
 
 class WandbEvalCallback(BaseCallback):
-    def __init__(self, eval_freq: int, n_episodes: int):
+    def __init__(self, eval_freq: int, n_episodes: int, save_best_path: str | None = None):
         super().__init__()
         self.eval_freq = eval_freq
         self.n_episodes = n_episodes
+        self._save_best_path = Path(save_best_path) if save_best_path else None
+        self._best: tuple[float, float] = (-1.0, -float("inf"))
 
     def _on_training_start(self) -> None:
         self._eval_env = Monitor(RacingEnv())
@@ -99,6 +101,13 @@ class WandbEvalCallback(BaseCallback):
                     logs[key] = name_to_val[key]
 
             wandb.log(logs, step=self.num_timesteps)
+
+            mean_laps = logs["eval/mean_laps"]
+            mean_reward = logs["eval/mean_reward"]
+            score = (mean_laps, mean_reward)
+            if self._save_best_path and score > self._best:
+                self._best = score
+                self.model.save(self._save_best_path / "best")
         return True
 
     def _on_training_end(self) -> None:
