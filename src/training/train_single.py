@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import random
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.monitor import Monitor
 
+from src.env.car import CAR_HALF_WIDTH, DT, MAX_SPEED
 from src.env.racing_env import RacingEnv
 from src.env.rewards import WALL_ZONE
 from src.training.callbacks import CheckpointCallback, WandbEvalCallback
@@ -24,7 +26,7 @@ def _git_short_sha() -> str:
             ["git", "rev-parse", "--short", "HEAD"], text=True
         ).strip()
         dirty = subprocess.check_output(
-            ["git", "status", "--porcelain"], text=True
+            ["git", "status", "--porcelain", "--untracked-files=no"], text=True
         ).strip()
         return f"{sha}-dirty" if dirty else sha
     except Exception:
@@ -53,12 +55,26 @@ def main() -> None:
     _seed_everything(seed)
 
     sha = _git_short_sha()
+    run_name = f"{train_cfg['run_name']}-{sha}"
+    ckpt_dir = Path(train_cfg["checkpoint_dir"]) / run_name
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+
+    env_constants = {
+        "WALL_ZONE": WALL_ZONE,
+        "MAX_SPEED": MAX_SPEED,
+        "DT": DT,
+        "CAR_HALF_WIDTH": CAR_HALF_WIDTH,
+    }
+    (ckpt_dir / "meta.json").write_text(
+        json.dumps({"run_name": run_name, "git_sha": sha, "config": cfg}, indent=2, default=str)
+    )
+
     wandb.init(
         project="slipstream",
-        name=f"{train_cfg['run_name']}-{sha}",
+        name=run_name,
         group=train_cfg.get("group", "single-agent"),
         tags=train_cfg.get("tags", []),
-        config={**cfg, "env_constants": {"WALL_ZONE": WALL_ZONE}},
+        config={**cfg, "git_sha": sha, "env_constants": env_constants},
         mode="disabled" if args.no_wandb else "online",
     )
 
@@ -70,7 +86,7 @@ def main() -> None:
     callbacks: list[BaseCallback] = [
         CheckpointCallback(
             save_freq=train_cfg["checkpoint_freq"],
-            save_dir=train_cfg["checkpoint_dir"],
+            save_dir=str(ckpt_dir),
         ),
         WandbEvalCallback(
             eval_freq=train_cfg["eval_freq"],
@@ -80,9 +96,7 @@ def main() -> None:
 
     model.learn(total_timesteps=total_timesteps, callback=callbacks)
 
-    final = Path(train_cfg["checkpoint_dir"]) / "final"
-    final.parent.mkdir(parents=True, exist_ok=True)
-    model.save(final)
+    model.save(ckpt_dir / "final")
 
     wandb.finish()
     env.close()

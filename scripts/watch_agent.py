@@ -1,8 +1,15 @@
+import argparse
+
 from stable_baselines3 import PPO
 
 from src.env.racing_env import RacingEnv
 
-model = PPO.load("checkpoints/single/final")
+parser = argparse.ArgumentParser()
+parser.add_argument("--checkpoint", default="checkpoints/single/final",
+                    help="Path to checkpoint (without .zip). Defaults to legacy path.")
+args = parser.parse_args()
+
+model = PPO.load(args.checkpoint)
 env = RacingEnv(render_mode="human")
 obs, _ = env.reset()
 
