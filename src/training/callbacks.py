@@ -58,27 +58,34 @@ class WandbEvalCallback(BaseCallback):
 
     def _on_step(self) -> bool:
         if self.num_timesteps % self.eval_freq == 0:
-            rewards, laps, lengths = [], [], []
+            rewards, laps, lengths, lat_ratios = [], [], [], []
             for _ in range(self.n_episodes):
                 obs, _ = self._eval_env.reset()
                 done = False
                 ep_reward, ep_len, last_info = 0.0, 0, {}
+                ep_lat: list[float] = []
                 while not done:
                     action, _ = self.model.predict(obs, deterministic=True)
                     obs, reward, terminated, truncated, info = self._eval_env.step(action)
                     ep_reward += float(reward)
                     ep_len += 1
                     last_info = info
+                    if "lateral_ratio" in info:
+                        ep_lat.append(float(info["lateral_ratio"]))
                     done = terminated or truncated
                 rewards.append(ep_reward)
                 laps.append(last_info.get("laps", 0))
                 lengths.append(ep_len)
+                if ep_lat:
+                    lat_ratios.append(sum(ep_lat) / len(ep_lat))
 
             logs = {
                 "eval/mean_reward": sum(rewards) / self.n_episodes,
                 "eval/mean_laps": sum(laps) / self.n_episodes,
                 "eval/mean_ep_len": sum(lengths) / self.n_episodes,
             }
+            if lat_ratios:
+                logs["eval/mean_lateral_ratio"] = sum(lat_ratios) / len(lat_ratios)
 
             name_to_val = self.logger.name_to_value
             for key in (

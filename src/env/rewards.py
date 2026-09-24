@@ -5,7 +5,9 @@ from dataclasses import dataclass
 import numpy as np
 
 from .track import Track
-from .car import MAX_SPEED
+from .car import MAX_SPEED, CAR_HALF_WIDTH
+
+WALL_ZONE = 0.8
 
 
 @dataclass
@@ -41,8 +43,10 @@ def _off_track_penalty() -> float:
 
 
 def _lateral_penalty(curr: AgentState, track: Track) -> float:
-    ratio = min(abs(curr.lateral) / track.half_width, 1.0)
-    return -0.15 * ratio ** 2
+    usable = track.half_width - CAR_HALF_WIDTH
+    ratio = min(abs(curr.lateral) / usable, 1.0)
+    wall_ratio = max(0.0, (ratio - WALL_ZONE) / (1.0 - WALL_ZONE))
+    return -0.15 * wall_ratio ** 2
 
 
 def _lap_bonus(curr: AgentState, prev: AgentState) -> float:

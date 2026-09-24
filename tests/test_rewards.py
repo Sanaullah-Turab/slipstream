@@ -7,6 +7,7 @@ from src.env.track import Track
 from src.env.rewards import (
     AgentState,
     MAX_SPEED,
+    WALL_ZONE,
     _heading_reward,
     _lap_bonus,
     _lateral_penalty,
@@ -15,6 +16,7 @@ from src.env.rewards import (
     _speed_reward,
     compute_reward,
 )
+from src.env.car import CAR_HALF_WIDTH
 
 
 @pytest.fixture(scope="module")
@@ -133,9 +135,10 @@ class TestLateralPenalty:
         assert _lateral_penalty(_state(lateral=track.half_width), track) == pytest.approx(-0.15, rel=1e-6)
 
     def test_symmetric(self, track):
-        hw = track.half_width / 2
-        assert _lateral_penalty(_state(lateral=-hw), track) == pytest.approx(
-            _lateral_penalty(_state(lateral=hw), track)
+        usable = track.half_width - CAR_HALF_WIDTH
+        lat = 0.9 * usable
+        assert _lateral_penalty(_state(lateral=-lat), track) == pytest.approx(
+            _lateral_penalty(_state(lateral=lat), track)
         )
 
     def test_defensive_clamp(self, track):
@@ -144,6 +147,21 @@ class TestLateralPenalty:
     def test_always_non_positive(self, track):
         for lat in [0.0, 10.0, -10.0, track.half_width]:
             assert _lateral_penalty(_state(lateral=lat), track) <= 0.0
+
+    def test_lateral_inner_zone_zero(self, track):
+        usable = track.half_width - CAR_HALF_WIDTH
+        assert _lateral_penalty(_state(lateral=0.5 * usable), track) == 0.0
+
+    def test_lateral_wall_onset_zero(self, track):
+        usable = track.half_width - CAR_HALF_WIDTH
+        assert _lateral_penalty(_state(lateral=WALL_ZONE * usable), track) == pytest.approx(0.0, abs=1e-9)
+
+    def test_lateral_monotone_near_wall(self, track):
+        usable = track.half_width - CAR_HALF_WIDTH
+        ratios = [0.82, 0.87, 0.92, 0.97, 1.0]
+        penalties = [_lateral_penalty(_state(lateral=r * usable), track) for r in ratios]
+        for i in range(len(penalties) - 1):
+            assert penalties[i] > penalties[i + 1]
 
 
 # ---------------------------------------------------------------------------
