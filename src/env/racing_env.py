@@ -123,7 +123,8 @@ class RacingEnv(gym.Env):
             reward,
             terminated,
             truncated,
-            {"laps": self._laps, "progress": self._progress, "speed": self._speed},
+            {"laps": self._laps, "progress": self._progress, "speed": self._speed,
+             "lateral_ratio": abs(self._lateral) / self.track.half_width},
         )
 
     def _build_obs(self) -> np.ndarray:
