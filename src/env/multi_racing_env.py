@@ -7,6 +7,8 @@ from pettingzoo import ParallelEnv
 from gymnasium import spaces
 
 from .track import Track
+from .car import CarState, DEFAULT_PARAMS, DT, step_physics
+from .racing_env import MAX_STEPS
 
 AGENTS = ["agent_0", "agent_1"]
 SPAWN_OFFSET_IDX = 10
@@ -20,7 +22,6 @@ class MultiRacingEnv(ParallelEnv):
         self.render_mode = render_mode
         self.possible_agents = AGENTS[:]
 
-        # Placeholder 15-dim observation for now
         obs_space = spaces.Box(low=-1.0, high=1.0, shape=(15,), dtype=np.float32)
         act_space = spaces.Box(
             low=np.array([-1.0, -1.0], dtype=np.float32),
@@ -65,23 +66,137 @@ class MultiRacingEnv(ParallelEnv):
             self._state[agent] = {
                 "pos": pos.copy(),
                 "heading": heading,
+                "speed": 0.0,
+                "heading_rate": 0.0,
+                "progress": ts.progress,
+                "lateral": ts.lateral,
+                "track_heading": ts.track_heading,
+                "arc_length": ts.arc_length,
+                "laps": 0,
+                "cumulative_distance": 0.0,
+                "respawns": 0,
             }
 
         obs = {a: np.zeros(15, dtype=np.float32) for a in self.agents}
-        info = {a: {} for a in self.agents}
+        info = {a: self._build_info(a) for a in self.agents}
         return obs, info
 
+    def _build_info(self, agent: str) -> dict:
+        s = self._state[agent]
+        return {
+            "laps": s["laps"],
+            "progress": s["progress"],
+            "speed": s["speed"],
+            "respawns": s["respawns"],
+            "cumulative_distance": s["cumulative_distance"],
+        }
+
     def step(self, actions: dict[str, np.ndarray]):
-        # Stub step function for Commit 2
-        self._step_count += 1
-        
-        obs = {a: np.zeros(15, dtype=np.float32) for a in self.agents}
-        rewards = {a: 0.0 for a in self.agents}
+        from .rewards import compute_reward, AgentState
+
+        rewards = {}
         terminations = {a: False for a in self.agents}
-        truncations = {a: False for a in self.agents}
-        infos = {a: {} for a in self.agents}
-        
+        truncations = {}
+        infos = {}
+
+        for agent in self.agents:
+            s = self._state[agent]
+            action = actions[agent]
+            steer = float(np.clip(action[0], -1.0, 1.0))
+            throttle = float(np.clip(action[1], -1.0, 1.0))
+
+            prev_state = AgentState(
+                pos=s["pos"].copy(),
+                heading=s["heading"],
+                speed=s["speed"],
+                progress=s["progress"],
+                lateral=s["lateral"],
+                track_heading=s["track_heading"],
+                on_track=True,
+                laps=s["laps"],
+                arc_length=s["arc_length"],
+            )
+
+            car = CarState(x=s["pos"][0], y=s["pos"][1], heading=s["heading"], speed=s["speed"])
+            car, heading_rate = step_physics(car, throttle, steer, DEFAULT_PARAMS, DT)
+            s["pos"][:] = car.x, car.y
+            s["heading"] = car.heading
+            s["speed"] = car.speed
+            s["heading_rate"] = heading_rate
+
+            ts = self.track.get_track_state(s["pos"])
+            s["progress"] = ts.progress
+            s["lateral"] = ts.lateral
+            s["track_heading"] = ts.track_heading
+
+            if s["progress"] - prev_state.progress < -0.5:
+                s["laps"] += 1
+
+            s["arc_length"] = ts.arc_length
+
+            arc_delta = s["arc_length"] - prev_state.arc_length
+            if arc_delta < -self.track.total_length / 2.0:
+                arc_delta += self.track.total_length
+            s["cumulative_distance"] += max(0.0, arc_delta)
+
+            curr_state = AgentState(
+                pos=s["pos"].copy(),
+                heading=s["heading"],
+                speed=s["speed"],
+                progress=s["progress"],
+                lateral=s["lateral"],
+                track_heading=s["track_heading"],
+                on_track=ts.on_track,
+                laps=s["laps"],
+                arc_length=s["arc_length"],
+            )
+
+            reward = compute_reward(curr_state, prev_state, self.track)
+
+            if not ts.on_track:
+                reward = -5.0
+                s["respawns"] += 1
+                self._respawn(agent)
+
+            rewards[agent] = reward
+
+        self._step_count += 1
+        truncated = self._step_count >= MAX_STEPS
+
+        for agent in self.agents:
+            truncations[agent] = truncated
+            infos[agent] = self._build_info(agent)
+
+        if truncated:
+            self.agents = []
+
+        obs_agents = AGENTS if truncated else self.agents
+        obs = {a: np.zeros(15, dtype=np.float32) for a in obs_agents}
+
         return obs, rewards, terminations, truncations, infos
+
+    def _respawn(self, agent: str) -> None:
+        s = self._state[agent]
+        opp_pos = self._state[AGENTS[1] if agent == AGENTS[0] else AGENTS[0]]["pos"]
+
+        idx = self.track.nearest_idx(s["pos"])
+        spawn_pos = self.track.centerline[idx].copy()
+
+        from .car import CAR_HALF_WIDTH
+        if np.linalg.norm(spawn_pos - opp_pos) < 2.0 * CAR_HALF_WIDTH:
+            spawn_pos = spawn_pos + self.track.normals[idx] * 2.0 * CAR_HALF_WIDTH
+
+        heading = float(np.arctan2(self.track.tangents[idx, 1], self.track.tangents[idx, 0]))
+        ts = self.track.get_track_state(spawn_pos)
+
+        s["pos"] = spawn_pos
+        s["heading"] = heading
+        s["speed"] = 0.0
+        s["heading_rate"] = 0.0
+        s["progress"] = ts.progress
+        s["lateral"] = ts.lateral
+        s["track_heading"] = ts.track_heading
+        s["arc_length"] = ts.arc_length
 
     def render(self):
         return None
