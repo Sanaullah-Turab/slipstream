@@ -1,7 +1,7 @@
 from typing import NamedTuple
 
 import numpy as np
-from scipy.interpolate import splprep, splev
+from scipy.interpolate import splprep, splev  # type: ignore
 
 TRACK_WIDTH = 65.0
 N_SAMPLES = 800
