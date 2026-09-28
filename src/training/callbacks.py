@@ -138,3 +138,86 @@ class WandbEvalCallback(BaseCallback):
 
     def _on_training_end(self) -> None:
         self._eval_env.close()
+
+
+class MultiEvalCallback(BaseCallback):
+    GAP_EPS_FRAC = 0.005
+
+    def __init__(self, eval_freq: int, n_episodes: int, save_best_path: str | None = None):
+        super().__init__()
+        self.eval_freq = eval_freq
+        self.n_episodes = n_episodes
+        self._save_best_path = Path(save_best_path) if save_best_path else None
+        self._best_score: float = -float("inf")
+
+    def _on_training_start(self) -> None:
+        from src.env.multi_racing_env import MultiRacingEnv
+        self._eval_env = MultiRacingEnv()
+        self._track_length = self._eval_env.track.total_length
+        self._gap_eps = self.GAP_EPS_FRAC * self._track_length
+
+    def _on_step(self) -> bool:
+        if self.num_timesteps % self.eval_freq != 0:
+            return True
+
+        from src.env.multi_racing_env import AGENTS
+
+        leader_laps, follower_laps = [], []
+        total_collisions, total_respawns, progress_gaps = [], [], []
+
+        for ep in range(self.n_episodes):
+            obs_dict, _ = self._eval_env.reset(seed=2000 + ep)
+            done = False
+            ep_infos = {a: {} for a in AGENTS}
+
+            while not done:
+                actions = {}
+                for a in AGENTS:
+                    action, _ = self.model.predict(obs_dict[a], deterministic=True)
+                    actions[a] = action
+                obs_dict, _, _, trunc_dict, info_dict = self._eval_env.step(actions)
+                ep_infos = info_dict
+                done = any(trunc_dict.values())
+
+            dist = {a: ep_infos[a]["cumulative_distance"] for a in AGENTS}
+            gap = abs(dist[AGENTS[0]] - dist[AGENTS[1]])
+            progress_gaps.append(gap / self._track_length)
+
+            if gap < self._gap_eps:
+                leader, follower = AGENTS[0], AGENTS[1]
+            else:
+                leader = max(dist, key=dist.get)
+                follower = AGENTS[1] if leader == AGENTS[0] else AGENTS[0]
+
+            leader_laps.append(ep_infos[leader]["laps"])
+            follower_laps.append(ep_infos[follower]["laps"])
+            total_collisions.append(ep_infos[AGENTS[0]]["collision_count"])
+            total_respawns.append(
+                ep_infos[AGENTS[0]]["respawns"] + ep_infos[AGENTS[1]]["respawns"]
+            )
+
+        import statistics
+
+        logs = {
+            "eval/leader/mean_laps": sum(leader_laps) / self.n_episodes,
+            "eval/leader/std_laps": statistics.stdev(leader_laps) if len(leader_laps) > 1 else 0.0,
+            "eval/follower/mean_laps": sum(follower_laps) / self.n_episodes,
+            "eval/follower/std_laps": statistics.stdev(follower_laps) if len(follower_laps) > 1 else 0.0,
+            "eval/mean_collisions_per_ep": sum(total_collisions) / self.n_episodes,
+            "eval/mean_respawns_per_ep": sum(total_respawns) / self.n_episodes,
+            "eval/mean_progress_gap": sum(progress_gaps) / self.n_episodes,
+        }
+        wandb.log(logs, step=self.num_timesteps)
+
+        mean_laps = logs["eval/leader/mean_laps"]
+        if self._save_best_path and mean_laps > self._best_score:
+            self._best_score = mean_laps
+            self.model.save(self._save_best_path / "best")
+            (self._save_best_path / "best.json").write_text(
+                json.dumps({"step": self.num_timesteps, **logs}, indent=2)
+            )
+        return True
+
+    def _on_training_end(self) -> None:
+        self._eval_env.close()
+
