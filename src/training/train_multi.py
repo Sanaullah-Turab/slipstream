@@ -11,6 +11,32 @@ import wandb
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 
+class FreezeActorCallback(BaseCallback):
+    def __init__(self, freeze_steps: int):
+        super().__init__()
+        self.freeze_steps = freeze_steps
+        self.frozen = False
+
+    def _on_training_start(self) -> None:
+        if self.freeze_steps <= 0:
+            return
+        self.frozen = True
+        print(f"Freezing actor (policy net, action net, log_std) for {self.freeze_steps} steps.")
+        for name, param in self.model.policy.named_parameters():
+            if "policy_net" in name or "action_net" in name or "log_std" in name:
+                param.requires_grad = False
+                print(f"  Frozen: {name}")
+
+    def _on_step(self) -> bool:
+        if self.frozen and self.num_timesteps >= self.freeze_steps:
+            print(f"Unfreezing actor at step {self.num_timesteps}.")
+            for name, param in self.model.policy.named_parameters():
+                if "policy_net" in name or "action_net" in name or "log_std" in name:
+                    param.requires_grad = True
+                    print(f"  Unfrozen: {name}")
+            self.frozen = False
+        return True
+
 from src.env.car import CAR_HALF_WIDTH, DT, MAX_SPEED
 from src.env.rewards import WALL_ZONE
 from src.env.vec_multi import TwoCarVecEnv
@@ -51,10 +77,17 @@ def _warm_start(model: PPO, checkpoint: str) -> None:
 
     def _patch_net(multi_net, single_net):
         with torch.no_grad():
-            w_single = single_net[0].weight.data
-            multi_net[0].weight.data[:, :w_single.shape[1]] = w_single
-            multi_net[0].weight.data[:, w_single.shape[1]:] = 0.0
-            multi_net[0].bias.data = single_net[0].bias.data.clone()
+            for i, (m_layer, s_layer) in enumerate(zip(multi_net, single_net)):
+                if hasattr(m_layer, "weight"):
+                    if i == 0:
+                        # Pad the first layer
+                        w_single = s_layer.weight.data
+                        m_layer.weight.data[:, :w_single.shape[1]] = w_single
+                        m_layer.weight.data[:, w_single.shape[1]:] = 0.0
+                    else:
+                        m_layer.weight.data.copy_(s_layer.weight.data)
+                if hasattr(m_layer, "bias") and m_layer.bias is not None:
+                    m_layer.bias.data.copy_(s_layer.bias.data)
 
     _patch_net(
         model.policy.mlp_extractor.policy_net,
@@ -77,6 +110,7 @@ def main() -> None:
         default=None,
         help="Path to single-agent checkpoint (without .zip) for warm start.",
     )
+    parser.add_argument("--freeze-actor-steps", type=int, default=0, help="Number of timesteps to freeze the actor for.")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -119,11 +153,12 @@ def main() -> None:
         tags=train_cfg.get("tags", []),
         config=wandb_config,
         mode="disabled" if args.no_wandb else "online",
+        sync_tensorboard=True,
     )
 
     env = TwoCarVecEnv()
     policy = ppo_cfg.pop("policy")
-    model = PPO(policy, env, **ppo_cfg, seed=seed, verbose=1, tensorboard_log=None)
+    model = PPO(policy, env, **ppo_cfg, seed=seed, verbose=1, tensorboard_log="runs")
 
     if args.warm_start:
         _warm_start(model, args.warm_start)
