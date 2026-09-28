@@ -124,6 +124,7 @@ class RacingEnv(gym.Env):
             terminated,
             truncated,
             {"laps": self._laps, "progress": self._progress, "speed": self._speed,
+             "cumulative_distance": self._laps * self.track.total_length + self._progress * self.track.total_length,
              "lateral_ratio": abs(self._lateral) / self.track.half_width},
         )
 

@@ -1,0 +1,72 @@
+import argparse
+import numpy as np
+from stable_baselines3 import PPO
+from src.env.racing_env import RacingEnv
+
+def measure_baseline(checkpoint_path: str, num_episodes: int, deterministic: bool, random_policy: bool = False):
+    env = RacingEnv(render_mode="rgb_array")
+    
+    if random_policy:
+        print("Using RANDOM policy for sanity check...")
+        model = None
+    else:
+        model = PPO.load(checkpoint_path)
+    
+    total_steps = 0
+    total_crashes = 0
+    track_len = env.track.total_length
+    
+    cumulative_distances = []
+    speeds = []
+    
+    for ep in range(num_episodes):
+        obs, _ = env.reset(seed=42 + ep)
+        done = False
+        ep_steps = 0
+        last_info = {}
+        while not done:
+            if model is None:
+                action = env.action_space.sample()
+            else:
+                action, _ = model.predict(obs, deterministic=deterministic)
+            obs, reward, terminated, truncated, info = env.step(action)
+            ep_steps += 1
+            total_steps += 1
+            last_info = info
+            if "speed" in info:
+                speeds.append(info["speed"])
+            
+            if terminated:
+                total_crashes += 1
+                done = True
+            if truncated:
+                done = True
+                
+        # Total fractional laps completed
+        cumulative_distances.append(last_info.get("cumulative_distance", 0.0))
+                
+    crash_rate = (total_crashes / total_steps) * 1000 if total_steps > 0 else 0
+    total_dist = sum(cumulative_distances)
+    overall_pace = (total_dist / track_len) / total_steps * 1000
+    mean_speed = np.mean(speeds) if speeds else 0.0
+    print(f"Mode: {'Deterministic' if deterministic else 'Stochastic'}")
+    print(f"Episodes: {num_episodes}")
+    print(f"Total Steps: {total_steps}")
+    print(f"Total Crashes: {total_crashes}")
+    print(f"Crash Rate (per 1000 steps): {crash_rate:.4f}")
+    print(f"Pace (laps/1000): {overall_pace:.4f}")
+    print(f"Mean Speed: {mean_speed:.2f}\n")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--checkpoint", default="checkpoints/single/slipstream-single-v1-ae7d617/final")
+    parser.add_argument("--episodes", type=int, default=50)
+    parser.add_argument("--random", action="store_true", help="Run a random policy sanity check")
+    args = parser.parse_args()
+    
+    if args.random:
+        measure_baseline("", args.episodes, deterministic=False, random_policy=True)
+    else:
+        print(f"Measuring baseline for: {args.checkpoint}")
+        measure_baseline(args.checkpoint, args.episodes, deterministic=True)
+        measure_baseline(args.checkpoint, args.episodes, deterministic=False)
