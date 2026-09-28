@@ -251,7 +251,104 @@ class MultiRacingEnv(ParallelEnv):
         s["arc_length"] = ts.arc_length
 
     def render(self):
-        return None
+        frame = self._render_frame()
+        if self.render_mode == "rgb_array":
+            return frame
+
+    def _render_frame(self):
+        import pygame
+        from .track import RAY_ANGLES
+
+        W, H = 800, 650
+
+        if self._screen is None:
+            pygame.init()
+            if self.render_mode == "human":
+                self._screen = pygame.display.set_mode((W, H))
+                pygame.display.set_caption("Slipstream — Multi Agent")
+            else:
+                self._screen = pygame.Surface((W, H))
+            self._clock = pygame.time.Clock()
+
+        surf = self._screen
+        surf.fill((28, 38, 22))
+
+        outer = [(int(x), int(y)) for x, y in self.track.outer]
+        inner = [(int(x), int(y)) for x, y in self.track.inner]
+        pygame.draw.polygon(surf, (52, 52, 52), outer)
+        pygame.draw.polygon(surf, (28, 38, 22), inner)
+        pygame.draw.lines(surf, (210, 210, 210), True, outer, 2)
+        pygame.draw.lines(surf, (210, 210, 210), True, inner, 2)
+
+        cl = self.track.centerline
+        for i in range(0, len(cl) - 8, 16):
+            pygame.draw.line(
+                surf, (85, 85, 85),
+                (int(cl[i, 0]), int(cl[i, 1])),
+                (int(cl[i + 8, 0]), int(cl[i + 8, 1])),
+                1,
+            )
+
+        colors = {"agent_0": (0, 200, 255), "agent_1": (255, 100, 50)}
+        ray_colors = {"agent_0": (255, 140, 0), "agent_1": (180, 255, 80)}
+
+        for agent in AGENTS:
+            s = self._state[agent]
+            pos, heading = s["pos"], s["heading"]
+            color = colors[agent]
+
+            rays = self.track.ray_distances(pos, heading, MAX_RAY_DIST)
+            for a, dist in zip(RAY_ANGLES, rays):
+                angle = heading + a
+                end = pos + dist * np.array([np.cos(angle), np.sin(angle)])
+                pygame.draw.line(
+                    surf, ray_colors[agent],
+                    (int(pos[0]), int(pos[1])),
+                    (int(end[0]), int(end[1])),
+                    1,
+                )
+
+            sz = 9
+            fwd = np.array([np.cos(heading), np.sin(heading)])
+            left = np.array([-fwd[1], fwd[0]])
+            tip = pos + fwd * sz
+            bl = pos - fwd * sz * 0.6 + left * sz * 0.55
+            br = pos - fwd * sz * 0.6 - left * sz * 0.55
+            pygame.draw.polygon(surf, color, [
+                (int(tip[0]), int(tip[1])),
+                (int(bl[0]), int(bl[1])),
+                (int(br[0]), int(br[1])),
+            ])
+
+        font = pygame.font.SysFont("monospace", 13)
+        hud_x = {AGENTS[0]: 8, AGENTS[1]: W // 2 + 4}
+        for agent in AGENTS:
+            s = self._state[agent]
+            x = hud_x[agent]
+            label_color = colors[agent]
+            surf.blit(font.render(agent, True, label_color), (x, 570))
+            for i, text in enumerate([
+                f"Speed:      {s['speed']:6.1f}",
+                f"Laps:       {s['laps']}",
+                f"Progress:   {s['progress']:.3f}",
+                f"Respawns:   {s['respawns']}",
+                f"Collisions: {s['collision_count']}",
+            ]):
+                surf.blit(font.render(text, True, (200, 200, 200)), (x, 585 + i * 14))
+
+        surf.blit(font.render(f"Step: {self._step_count}", True, (160, 160, 160)), (8, 555))
+
+        if self.render_mode == "human":
+            pygame.event.pump()
+            pygame.display.flip()
+            assert self._clock is not None
+            self._clock.tick(self.metadata["render_fps"])
+            return None
+
+        return np.transpose(np.array(pygame.surfarray.pixels3d(surf)), axes=(1, 0, 2))
 
     def close(self) -> None:
-        pass
+        if self._screen is not None:
+            import pygame
+            pygame.quit()
+            self._screen = None
