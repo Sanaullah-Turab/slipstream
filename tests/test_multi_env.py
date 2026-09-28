@@ -166,6 +166,34 @@ def test_vec_env_truncation_terminal_obs():
     vec.close()
 
 
+def test_batched_inference_equivalence():
+    from stable_baselines3 import PPO
+    env = MultiRacingEnv()
+    obs_dict, _ = env.reset(seed=42)
+    
+    # We can use a randomly initialized PPO model to verify inference logic
+    # since we just want to prove deterministic outputs match for identical inputs.
+    model = PPO("MlpPolicy", TwoCarVecEnv(), seed=42)
+    
+    # 1. Sequential prediction
+    act0, _ = model.predict(obs_dict[AGENTS[0]], deterministic=True)
+    act1, _ = model.predict(obs_dict[AGENTS[1]], deterministic=True)
+    
+    # 2. Batched prediction
+    obs_batch = np.stack([obs_dict[a] for a in AGENTS])
+    actions_batch, _ = model.predict(obs_batch, deterministic=True)
+    
+    # Verify match (use allclose because PyTorch batched operations have ~1e-7 float32 differences)
+    np.testing.assert_allclose(act0, actions_batch[0], atol=1e-5)
+    np.testing.assert_allclose(act1, actions_batch[1], atol=1e-5)
+    
+    # Verify row order is robust by reversing the stack
+    obs_batch_rev = np.stack([obs_dict[AGENTS[1]], obs_dict[AGENTS[0]]])
+    actions_batch_rev, _ = model.predict(obs_batch_rev, deterministic=True)
+    np.testing.assert_allclose(act1, actions_batch_rev[0], atol=1e-5)
+    np.testing.assert_allclose(act0, actions_batch_rev[1], atol=1e-5)
+
+
 def test_parallel_api():
     from pettingzoo.test import parallel_api_test
     env = MultiRacingEnv()

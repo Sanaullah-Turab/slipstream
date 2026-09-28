@@ -146,12 +146,10 @@ class WandbEvalCallback(BaseCallback):
 class MultiEvalCallback(BaseCallback):
     GAP_EPS_FRAC = 0.005
 
-    def __init__(self, eval_freq: int, n_episodes: int, save_best_path: str | None = None):
+    def __init__(self, eval_freq: int, n_episodes: int):
         super().__init__()
         self.eval_freq = eval_freq
         self.n_episodes = n_episodes
-        self._save_best_path = Path(save_best_path) if save_best_path else None
-        self._best_score: float = -float("inf")
 
     def _on_training_start(self) -> None:
         self._eval_env = _MultiRacingEnv()
@@ -206,14 +204,6 @@ class MultiEvalCallback(BaseCallback):
             "eval/mean_progress_gap": sum(progress_gaps) / self.n_episodes,
         }
         wandb.log(logs, step=self.num_timesteps)
-
-        mean_laps = logs["eval/leader/mean_laps"]
-        if self._save_best_path and mean_laps > self._best_score:
-            self._best_score = mean_laps
-            self.model.save(self._save_best_path / "best")
-            (self._save_best_path / "best.json").write_text(
-                json.dumps({"step": self.num_timesteps, **logs}, indent=2)
-            )
         return True
 
     def _on_training_end(self) -> None:
