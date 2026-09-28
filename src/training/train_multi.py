@@ -41,6 +41,14 @@ def _seed_everything(seed: int) -> None:
 def _warm_start(model: PPO, checkpoint: str) -> None:
     single = PPO.load(checkpoint)
 
+    # Validate that the single-agent model expects exactly 11 dims
+    # (policy_net first layer weight shape: [hidden_dim, input_dim])
+    single_input_dim = single.policy.mlp_extractor.policy_net[0].weight.shape[1]
+    if single_input_dim != 11:
+        raise ValueError(
+            f"Warm-start model has {single_input_dim} obs dims; expected 11 (legacy single-agent)."
+        )
+
     def _patch_net(multi_net, single_net):
         with torch.no_grad():
             w_single = single_net[0].weight.data
@@ -94,12 +102,22 @@ def main() -> None:
         json.dumps({"run_name": run_name, "git_sha": sha, "config": cfg}, indent=2, default=str)
     )
 
+    wandb_config = {**cfg, "git_sha": sha, "env_constants": env_constants, "warm_start": args.warm_start}
+    if args.warm_start:
+        ws_path = Path(args.warm_start)
+        meta_file = ws_path.parent / "meta.json"
+        if meta_file.exists():
+            try:
+                wandb_config["warm_start_meta"] = json.loads(meta_file.read_text())
+            except Exception:
+                pass
+
     wandb.init(
         project="slipstream",
         name=run_name,
         group=train_cfg.get("group", "multi-agent"),
         tags=train_cfg.get("tags", []),
-        config={**cfg, "git_sha": sha, "env_constants": env_constants, "warm_start": args.warm_start},
+        config=wandb_config,
         mode="disabled" if args.no_wandb else "online",
     )
 
