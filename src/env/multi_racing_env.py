@@ -7,11 +7,12 @@ from pettingzoo import ParallelEnv
 from gymnasium import spaces
 
 from .track import Track
-from .car import CarState, DEFAULT_PARAMS, DT, step_physics
-from .racing_env import MAX_STEPS
+from .car import CarState, DEFAULT_PARAMS, DT, MAX_SPEED, step_physics
+from .racing_env import MAX_STEPS, MAX_HEADING_RATE, MAX_RAY_DIST
 
 AGENTS = ["agent_0", "agent_1"]
 SPAWN_OFFSET_IDX = 10
+MAX_OPP_DIST = 300.0
 
 class MultiRacingEnv(ParallelEnv):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30, "name": "multi_racing_v1"}
@@ -77,9 +78,49 @@ class MultiRacingEnv(ParallelEnv):
                 "respawns": 0,
             }
 
-        obs = {a: np.zeros(15, dtype=np.float32) for a in self.agents}
+        obs = {a: self._build_obs(a) for a in self.agents}
         info = {a: self._build_info(a) for a in self.agents}
         return obs, info
+
+    def _build_obs(self, agent: str) -> np.ndarray:
+        s = self._state[agent]
+        opp = self._state[AGENTS[1] if agent == AGENTS[0] else AGENTS[0]]
+
+        heading_err = s["heading"] - s["track_heading"]
+        lateral_norm = float(np.clip(s["lateral"] / self.track.half_width, -1.0, 1.0))
+        rays = self.track.ray_distances(s["pos"], s["heading"], MAX_RAY_DIST) / MAX_RAY_DIST
+
+        opp_dist = float(np.clip(np.linalg.norm(opp["pos"] - s["pos"]) / MAX_OPP_DIST, 0.0, 1.0))
+
+        arc_gap = opp["arc_length"] - s["arc_length"]
+        half_len = self.track.total_length / 2.0
+        if arc_gap > half_len:
+            arc_gap -= self.track.total_length
+        elif arc_gap < -half_len:
+            arc_gap += self.track.total_length
+        opp_progress_gap = float(np.clip(arc_gap / MAX_OPP_DIST, -1.0, 1.0))
+
+        opp_rel_speed = float(np.clip((opp["speed"] - s["speed"]) / MAX_SPEED, -1.0, 1.0))
+        opp_lateral_gap = float(
+            np.clip((opp["lateral"] - s["lateral"]) / (2.0 * self.track.half_width), -1.0, 1.0)
+        )
+
+        return np.array(
+            [
+                s["speed"] / MAX_SPEED,
+                np.sin(heading_err),
+                np.cos(heading_err),
+                lateral_norm,
+                s["progress"],
+                float(np.clip(s["heading_rate"] / MAX_HEADING_RATE, -1.0, 1.0)),
+                *np.clip(rays, 0.0, 1.0),
+                opp_dist,
+                opp_progress_gap,
+                opp_rel_speed,
+                opp_lateral_gap,
+            ],
+            dtype=np.float32,
+        )
 
     def _build_info(self, agent: str) -> dict:
         s = self._state[agent]
@@ -171,7 +212,7 @@ class MultiRacingEnv(ParallelEnv):
             self.agents = []
 
         obs_agents = AGENTS if truncated else self.agents
-        obs = {a: np.zeros(15, dtype=np.float32) for a in obs_agents}
+        obs = {a: self._build_obs(a) for a in obs_agents}
 
         return obs, rewards, terminations, truncations, infos
 
