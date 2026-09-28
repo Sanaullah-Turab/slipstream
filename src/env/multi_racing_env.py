@@ -7,8 +7,9 @@ from pettingzoo import ParallelEnv
 from gymnasium import spaces
 
 from .track import Track
-from .car import CarState, DEFAULT_PARAMS, DT, MAX_SPEED, step_physics
+from .car import CarState, DEFAULT_PARAMS, DT, MAX_SPEED, CAR_HALF_WIDTH, step_physics
 from .racing_env import MAX_STEPS, MAX_HEADING_RATE, MAX_RAY_DIST
+from .rewards import compute_reward, AgentState
 
 AGENTS = ["agent_0", "agent_1"]
 SPAWN_OFFSET_IDX = 10
@@ -23,14 +24,15 @@ class MultiRacingEnv(ParallelEnv):
         self.render_mode = render_mode
         self.possible_agents = AGENTS[:]
 
-        obs_space = spaces.Box(low=-1.0, high=1.0, shape=(15,), dtype=np.float32)
-        act_space = spaces.Box(
-            low=np.array([-1.0, -1.0], dtype=np.float32),
-            high=np.array([1.0, 1.0], dtype=np.float32),
-            dtype=np.float32,
-        )
-        self.observation_spaces = {a: obs_space for a in AGENTS}
-        self.action_spaces = {a: act_space for a in AGENTS}
+        self.observation_spaces = {a: spaces.Box(low=-1.0, high=1.0, shape=(15,), dtype=np.float32) for a in AGENTS}
+        self.action_spaces = {
+            a: spaces.Box(
+                low=np.array([-1.0, -1.0], dtype=np.float32),
+                high=np.array([1.0, 1.0], dtype=np.float32),
+                dtype=np.float32,
+            )
+            for a in AGENTS
+        }
 
         self._state: dict = {}
         self._step_count = 0
@@ -136,8 +138,6 @@ class MultiRacingEnv(ParallelEnv):
         }
 
     def step(self, actions: dict[str, np.ndarray]):
-        from .rewards import compute_reward, AgentState
-
         rewards = {}
         terminations = {a: False for a in self.agents}
         truncations = {}
@@ -208,7 +208,6 @@ class MultiRacingEnv(ParallelEnv):
 
         # Collision detection (rising edges only)
         s0, s1 = self._state[AGENTS[0]], self._state[AGENTS[1]]
-        from .car import CAR_HALF_WIDTH
         colliding = float(np.linalg.norm(s0["pos"] - s1["pos"])) < 2.0 * CAR_HALF_WIDTH
         for s in (s0, s1):
             if colliding and not s["prev_colliding"]:
@@ -236,14 +235,13 @@ class MultiRacingEnv(ParallelEnv):
         idx = self.track.nearest_idx(s["pos"])
         spawn_pos = self.track.centerline[idx].copy()
 
-        from .car import CAR_HALF_WIDTH
         if np.linalg.norm(spawn_pos - opp_pos) < 2.0 * CAR_HALF_WIDTH:
             spawn_pos = spawn_pos + self.track.normals[idx] * 2.0 * CAR_HALF_WIDTH
 
         heading = float(np.arctan2(self.track.tangents[idx, 1], self.track.tangents[idx, 0]))
         ts = self.track.get_track_state(spawn_pos)
 
-        s["pos"] = spawn_pos
+        s["pos"][:] = spawn_pos
         s["heading"] = heading
         s["speed"] = 0.0
         s["heading_rate"] = 0.0
