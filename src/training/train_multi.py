@@ -98,6 +98,13 @@ def _warm_start(model: PPO, checkpoint: str) -> None:
         single.policy.mlp_extractor.value_net,
     )
 
+    # Copy action_net and log_std (they have exact same dimensions)
+    model.policy.action_net.load_state_dict(single.policy.action_net.state_dict())
+    model.policy.log_std.data.copy_(single.policy.log_std.data)
+    
+    # Copy value_net (value head)
+    model.policy.value_net.load_state_dict(single.policy.value_net.state_dict())
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -173,11 +180,18 @@ def main() -> None:
             n_episodes=train_cfg["eval_episodes"],
         ),
     ]
+    if args.freeze_actor_steps > 0:
+        callbacks.append(FreezeActorCallback(args.freeze_actor_steps))
 
-    model.learn(total_timesteps=total_timesteps, callback=callbacks)
-    model.save(ckpt_dir / "final")
-    wandb.finish()
-    env.close()
+    try:
+        model.learn(total_timesteps=total_timesteps, callback=callbacks)
+        model.save(ckpt_dir / "final")
+    except KeyboardInterrupt:
+        print("\nTraining interrupted by user. Saving interrupted.zip...")
+        model.save(ckpt_dir / "interrupted")
+    finally:
+        wandb.finish()
+        env.close()
 
 
 if __name__ == "__main__":
