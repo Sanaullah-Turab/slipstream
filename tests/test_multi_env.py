@@ -129,6 +129,8 @@ def test_truncation():
     env = MultiRacingEnv()
     env.reset(seed=0)
     acts = zero_actions(env)
+    truncs: dict = {}
+    terms: dict = {}
     for _ in range(MAX_STEPS):
         obs, rew, terms, truncs, infos = env.step(acts)
     for a in AGENTS:
@@ -139,11 +141,12 @@ def test_truncation():
 
 def test_vec_env_shape():
     env = TwoCarVecEnv()
-    obs = env.reset()
+    obs = np.asarray(env.reset())
     assert obs.shape == (2, 15)
     actions = np.stack([env.action_space.sample() for _ in range(2)])
-    obs, rewards, dones, infos = env.step(actions)
-    assert obs.shape == (2, 15)
+    obs_step, rewards, dones, infos = env.step(actions)
+    obs_step = np.asarray(obs_step)
+    assert obs_step.shape == (2, 15)
     assert rewards.shape == (2,)
     assert dones.shape == (2,)
     env.close()
@@ -153,6 +156,7 @@ def test_vec_env_truncation_terminal_obs():
     vec = TwoCarVecEnv()
     vec.reset()
     actions = np.zeros((2, 2), dtype=np.float32)
+    infos: list = []
     for _ in range(MAX_STEPS):
         obs, rew, dones, infos = vec.step(actions)
     for info in infos:

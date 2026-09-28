@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import statistics
 import subprocess
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.monitor import Monitor
 
 from src.env.car import DT
+from src.env.multi_racing_env import MultiRacingEnv as _MultiRacingEnv, AGENTS as _MULTI_AGENTS
 from src.env.racing_env import RacingEnv
 
 
@@ -151,8 +153,7 @@ class MultiEvalCallback(BaseCallback):
         self._best_score: float = -float("inf")
 
     def _on_training_start(self) -> None:
-        from src.env.multi_racing_env import MultiRacingEnv
-        self._eval_env = MultiRacingEnv()
+        self._eval_env = _MultiRacingEnv()
         self._track_length = self._eval_env.track.total_length
         self._gap_eps = self.GAP_EPS_FRAC * self._track_length
 
@@ -160,43 +161,39 @@ class MultiEvalCallback(BaseCallback):
         if self.num_timesteps % self.eval_freq != 0:
             return True
 
-        from src.env.multi_racing_env import AGENTS
-
         leader_laps, follower_laps = [], []
         total_collisions, total_respawns, progress_gaps = [], [], []
 
         for ep in range(self.n_episodes):
             obs_dict, _ = self._eval_env.reset(seed=2000 + ep)
             done = False
-            ep_infos = {a: {} for a in AGENTS}
+            ep_infos: dict = {a: {} for a in _MULTI_AGENTS}
 
             while not done:
                 actions = {}
-                for a in AGENTS:
+                for a in _MULTI_AGENTS:
                     action, _ = self.model.predict(obs_dict[a], deterministic=True)
                     actions[a] = action
                 obs_dict, _, _, trunc_dict, info_dict = self._eval_env.step(actions)
                 ep_infos = info_dict
                 done = any(trunc_dict.values())
 
-            dist = {a: ep_infos[a]["cumulative_distance"] for a in AGENTS}
-            gap = abs(dist[AGENTS[0]] - dist[AGENTS[1]])
+            dist = {a: ep_infos[a]["cumulative_distance"] for a in _MULTI_AGENTS}
+            gap = abs(dist[_MULTI_AGENTS[0]] - dist[_MULTI_AGENTS[1]])
             progress_gaps.append(gap / self._track_length)
 
             if gap < self._gap_eps:
-                leader, follower = AGENTS[0], AGENTS[1]
+                leader, follower = _MULTI_AGENTS[0], _MULTI_AGENTS[1]
             else:
-                leader = max(dist, key=dist.get)
-                follower = AGENTS[1] if leader == AGENTS[0] else AGENTS[0]
+                leader = max(_MULTI_AGENTS, key=lambda a: dist[a])
+                follower = _MULTI_AGENTS[1] if leader == _MULTI_AGENTS[0] else _MULTI_AGENTS[0]
 
             leader_laps.append(ep_infos[leader]["laps"])
             follower_laps.append(ep_infos[follower]["laps"])
-            total_collisions.append(ep_infos[AGENTS[0]]["collision_count"])
+            total_collisions.append(ep_infos[_MULTI_AGENTS[0]]["collision_count"])
             total_respawns.append(
-                ep_infos[AGENTS[0]]["respawns"] + ep_infos[AGENTS[1]]["respawns"]
+                ep_infos[_MULTI_AGENTS[0]]["respawns"] + ep_infos[_MULTI_AGENTS[1]]["respawns"]
             )
-
-        import statistics
 
         logs = {
             "eval/leader/mean_laps": sum(leader_laps) / self.n_episodes,
