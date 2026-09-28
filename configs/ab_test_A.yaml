@@ -16,7 +16,7 @@ ppo:
   device: cpu
 
 train:
-  total_timesteps: 200_000
+  total_timesteps: 2_000_000
   seed: 42
   checkpoint_freq: 200_000
   eval_freq: 20_000
