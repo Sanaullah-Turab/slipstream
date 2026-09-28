@@ -68,8 +68,8 @@ def _warm_start(model: PPO, checkpoint: str) -> None:
     single = PPO.load(checkpoint)
 
     # Validate that the single-agent model expects exactly 11 dims
-    # (policy_net first layer weight shape: [hidden_dim, input_dim])
-    single_input_dim = single.policy.mlp_extractor.policy_net[0].weight.shape[1]
+    first_layer = getattr(single.policy.mlp_extractor.policy_net, "0")
+    single_input_dim = first_layer.weight.shape[1]
     if single_input_dim != 11:
         raise ValueError(
             f"Warm-start model has {single_input_dim} obs dims; expected 11 (legacy single-agent)."

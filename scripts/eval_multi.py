@@ -15,7 +15,8 @@ def main(args):
         model = PPO.load(args.checkpoint)
         
         # Auto-patch if testing step-0 single agent model directly
-        single_input_dim = model.policy.mlp_extractor.policy_net[0].weight.shape[1]
+        first_layer = getattr(model.policy.mlp_extractor.policy_net, "0")
+        single_input_dim = first_layer.weight.shape[1]
         if single_input_dim == 11:
             import torch
             from gymnasium.spaces import Box
@@ -25,10 +26,11 @@ def main(args):
             
             def _patch_net(net):
                 with torch.no_grad():
-                    w_single = net[0].weight.data
-                    w_multi = torch.zeros((net[0].out_features, 15), device=w_single.device)
+                    first = getattr(net, "0")
+                    w_single = first.weight.data
+                    w_multi = torch.zeros((first.out_features, 15), device=w_single.device)
                     w_multi[:, :11] = w_single
-                    net[0].weight.data = w_multi
+                    first.weight.data = w_multi
             
             _patch_net(model.policy.mlp_extractor.policy_net)
             _patch_net(model.policy.mlp_extractor.value_net)
@@ -41,6 +43,10 @@ def main(args):
     mean_laterals = {a: [] for a in AGENTS}
     leader_dist_laps, follower_dist_laps = [], []
     ep_min_dists, ep_close_fractions = [], []
+    
+    global_solo = 0
+    global_col = 0
+    leader, follower = AGENTS[0], AGENTS[1]
 
     print(f"Evaluating {args.checkpoint} over {args.episodes} episodes...")
 
@@ -129,13 +135,10 @@ def main(args):
               f"Follower Laps={follower_laps[-1]:.2f}, Collisions={total_collisions[-1]}, "
               f"Solo Crashes={ep_solo_crashes}, Col-Crashes={ep_col_crashes}")
         
-        if not hasattr(env, '_global_solo'):
-            env._global_solo = 0
-            env._global_col = 0
-        env._global_solo += ep_solo_crashes
-        env._global_col += ep_col_crashes
+        global_solo += ep_solo_crashes
+        global_col += ep_col_crashes
 
-    mean_leader = statistics.mean(leader_laps)
+    mean_leader = statistics.mean(leader_laps) if leader_laps else 0.0
     mean_follower = statistics.mean(follower_laps)
     
     mean_leader_pace = (statistics.mean(leader_dist_laps) / 2000.0) * 1000.0
@@ -167,9 +170,9 @@ def main(args):
     print(f"Fraction steps dist < 18: {statistics.mean(ep_close_fractions):.4f}")
     
     agent_steps = args.episodes * 2000 * 2
-    solo_rate = (env._global_solo / agent_steps) * 1000
-    col_rate = (env._global_col / agent_steps) * 1000
-    total_rate = ((env._global_solo + env._global_col) / agent_steps) * 1000
+    solo_rate = (global_solo / agent_steps) * 1000
+    col_rate = (global_col / agent_steps) * 1000
+    total_rate = ((global_solo + global_col) / agent_steps) * 1000
     
     print(f"\nCrash Rates (per 1000 agent-steps):")
     print(f"  Solo Crashes:            {solo_rate:.4f}")

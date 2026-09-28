@@ -23,7 +23,7 @@ def measure_baseline(checkpoint_path: str, num_episodes: int, deterministic: boo
         obs, _ = env.reset(seed=42 + ep)
         done = False
         ep_steps = 0
-        last_info = None
+        last_info = {}
         while not done:
             if model is None:
                 action = env.action_space.sample()

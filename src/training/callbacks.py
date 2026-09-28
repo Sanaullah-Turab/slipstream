@@ -180,6 +180,9 @@ class MultiEvalCallback(BaseCallback):
                 ep_infos = info_dict
                 done = any(trunc_dict.values())
 
+            pace = 0.0
+            speed = 0.0
+            
             dist = {a: ep_infos[a]["cumulative_distance"] for a in _MULTI_AGENTS}
             race_pos = {a: ep_infos[a]["cumulative_distance"] + ep_infos[a].get("start_offset", 0.0) for a in _MULTI_AGENTS}
             gap = abs(race_pos[_MULTI_AGENTS[0]] - race_pos[_MULTI_AGENTS[1]])
