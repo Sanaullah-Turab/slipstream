@@ -181,13 +181,14 @@ class MultiEvalCallback(BaseCallback):
                 done = any(trunc_dict.values())
 
             dist = {a: ep_infos[a]["cumulative_distance"] for a in _MULTI_AGENTS}
-            gap = abs(dist[_MULTI_AGENTS[0]] - dist[_MULTI_AGENTS[1]])
+            race_pos = {a: ep_infos[a]["cumulative_distance"] + ep_infos[a].get("start_offset", 0.0) for a in _MULTI_AGENTS}
+            gap = abs(race_pos[_MULTI_AGENTS[0]] - race_pos[_MULTI_AGENTS[1]])
             progress_gaps.append(gap / self._track_length)
 
             if gap < self._gap_eps:
                 leader, follower = _MULTI_AGENTS[0], _MULTI_AGENTS[1]
             else:
-                leader = max(_MULTI_AGENTS, key=lambda a: dist[a])
+                leader = max(_MULTI_AGENTS, key=lambda a: race_pos[a])
                 follower = _MULTI_AGENTS[1] if leader == _MULTI_AGENTS[0] else _MULTI_AGENTS[0]
 
             leader_laps.append(ep_infos[leader]["laps"])
