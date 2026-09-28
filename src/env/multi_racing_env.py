@@ -76,6 +76,8 @@ class MultiRacingEnv(ParallelEnv):
                 "laps": 0,
                 "cumulative_distance": 0.0,
                 "respawns": 0,
+                "prev_colliding": False,
+                "collision_count": 0,
             }
 
         obs = {a: self._build_obs(a) for a in self.agents}
@@ -129,6 +131,7 @@ class MultiRacingEnv(ParallelEnv):
             "progress": s["progress"],
             "speed": s["speed"],
             "respawns": s["respawns"],
+            "collision_count": s["collision_count"],
             "cumulative_distance": s["cumulative_distance"],
         }
 
@@ -202,6 +205,16 @@ class MultiRacingEnv(ParallelEnv):
             rewards[agent] = reward
 
         self._step_count += 1
+
+        # Collision detection (rising edges only)
+        s0, s1 = self._state[AGENTS[0]], self._state[AGENTS[1]]
+        from .car import CAR_HALF_WIDTH
+        colliding = float(np.linalg.norm(s0["pos"] - s1["pos"])) < 2.0 * CAR_HALF_WIDTH
+        for s in (s0, s1):
+            if colliding and not s["prev_colliding"]:
+                s["collision_count"] += 1
+            s["prev_colliding"] = colliding
+
         truncated = self._step_count >= MAX_STEPS
 
         for agent in self.agents:
