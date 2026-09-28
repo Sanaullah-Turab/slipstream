@@ -197,7 +197,13 @@ class MultiEvalCallback(BaseCallback):
             total_respawns.append(
                 ep_infos[_MULTI_AGENTS[0]]["respawns"] + ep_infos[_MULTI_AGENTS[1]]["respawns"]
             )
-
+            
+            # Pace (Laps per 1000 steps)
+            leader_dist_laps = race_pos[leader] / self._track_length
+            pace = (leader_dist_laps / 2000.0) * 1000.0
+            speed = pace * self._track_length / 1000.0  # approximate mean speed
+            # Here we just take the last episode's pace for simplicity since they are all 2000 steps
+            
         logs = {
             "eval/leader/mean_laps": sum(leader_laps) / self.n_episodes,
             "eval/leader/std_laps": statistics.stdev(leader_laps) if len(leader_laps) > 1 else 0.0,
@@ -206,10 +212,41 @@ class MultiEvalCallback(BaseCallback):
             "eval/mean_collisions_per_ep": sum(total_collisions) / self.n_episodes,
             "eval/mean_respawns_per_ep": sum(total_respawns) / self.n_episodes,
             "eval/mean_progress_gap": sum(progress_gaps) / self.n_episodes,
+            "eval/leader/mean_pace_dist": pace,
+            "eval/leader/mean_speed": speed,
         }
         wandb.log(logs, step=self.num_timesteps)
         return True
 
     def _on_training_end(self) -> None:
         self._eval_env.close()
+
+class TrainCrashCallback(BaseCallback):
+    def __init__(self):
+        super().__init__()
+        self.rollout_respawns = 0
+        self.rollout_steps = 0
+
+    def _on_rollout_start(self) -> None:
+        self.rollout_respawns = 0
+        self.rollout_steps = 0
+
+    def _on_step(self) -> bool:
+        infos = self.locals.get("infos", [])
+        dones = self.locals.get("dones", [])
+        
+        for i, done in enumerate(dones):
+            self.rollout_steps += 1
+            if done and i < len(infos):
+                # When done, we grab the final cumulative respawns for that episode
+                # Wait, SB3 resets the env BEFORE returning info? 
+                # vec_multi.py puts the terminal info in `infos[i]`. So `infos[i]["respawns"]` is correct.
+                self.rollout_respawns += infos[i].get("respawns", 0)
+        return True
+
+    def _on_rollout_end(self) -> None:
+        if self.rollout_steps > 0:
+            rate = (self.rollout_respawns / self.rollout_steps) * 1000.0
+            self.logger.record("train/respawns_per_1000_steps", rate)
+
 

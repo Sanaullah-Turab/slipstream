@@ -82,6 +82,8 @@ class Track:
         delta = pos - self.centerline[idx]
         lateral = float(np.dot(delta, self.normals[idx]))
         arc = self.arc_lengths[idx] + float(np.dot(delta, self.tangents[idx]))
+        if abs(arc) < 1e-10:
+            arc = 0.0
         progress = (arc % self.total_length) / self.total_length
         heading = float(np.arctan2(self.tangents[idx, 1], self.tangents[idx, 0]))
         on_track = abs(lateral) <= self.half_width
