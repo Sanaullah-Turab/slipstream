@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Iterable, Optional, Sequence, Type, Union
+from typing import Any, Optional, Sequence, Type
 
 import numpy as np
 from gymnasium import Wrapper
@@ -21,16 +21,10 @@ class TwoCarVecEnv(VecEnv):
         act_space = self.env.action_space(AGENTS[0])
         super().__init__(num_envs=2, observation_space=obs_space, action_space=act_space)
         self._actions: Optional[np.ndarray] = None
-        self._last_obs: Optional[np.ndarray] = None
-
-    # ------------------------------------------------------------------
-    # Core interface
-    # ------------------------------------------------------------------
 
     def reset(self) -> np.ndarray:
         obs_dict, _ = self.env.reset()
-        self._last_obs = np.stack([obs_dict[a] for a in AGENTS])
-        return self._last_obs
+        return np.stack([obs_dict[a] for a in AGENTS])
 
     def step_async(self, actions: np.ndarray) -> None:
         self._actions = actions
@@ -58,21 +52,15 @@ class TwoCarVecEnv(VecEnv):
             obs_reset_dict, _ = self.env.reset()
             obs = np.stack([obs_reset_dict[a] for a in AGENTS])
 
-        self._last_obs = obs
         self._actions = None
         return obs, rewards, dones, infos
-
-    # ------------------------------------------------------------------
-    # Required abstract methods
-    # ------------------------------------------------------------------
 
     def close(self) -> None:
         self.env.close()
 
     def get_attr(self, attr_name: str, indices=None) -> list[Any]:
         val = getattr(self.env, attr_name)
-        n = len(self._resolve_indices(indices))
-        return [val] * n
+        return [val] * len(self._resolve_indices(indices))
 
     def set_attr(self, attr_name: str, value: Any, indices=None) -> None:
         setattr(self.env, attr_name, value)
@@ -85,22 +73,16 @@ class TwoCarVecEnv(VecEnv):
         **method_kwargs,
     ) -> list[Any]:
         result = getattr(self.env, method_name)(*method_args, **method_kwargs)
-        n = len(self._resolve_indices(indices))
-        return [result] * n
+        return [result] * len(self._resolve_indices(indices))
 
     def env_is_wrapped(
         self, wrapper_class: Type[Wrapper], indices=None
     ) -> list[bool]:
-        n = len(self._resolve_indices(indices))
-        return [False] * n
+        return [False] * len(self._resolve_indices(indices))
 
     def seed(self, seed: Optional[int] = None) -> Sequence[Optional[int]]:
         self.env.reset(seed=seed)
         return [seed, seed]
-
-    # ------------------------------------------------------------------
-    # Helper
-    # ------------------------------------------------------------------
 
     def _resolve_indices(self, indices) -> list[int]:
         if indices is None:

@@ -178,10 +178,11 @@ class MultiRacingEnv(ParallelEnv):
 
             s["arc_length"] = ts.arc_length
 
-            arc_delta = s["arc_length"] - prev_state.arc_length
-            if arc_delta < -self.track.total_length / 2.0:
-                arc_delta += self.track.total_length
-            s["cumulative_distance"] += max(0.0, arc_delta)
+            if ts.on_track:
+                arc_delta = s["arc_length"] - prev_state.arc_length
+                if arc_delta < -self.track.total_length / 2.0:
+                    arc_delta += self.track.total_length
+                s["cumulative_distance"] += max(0.0, arc_delta)
 
             curr_state = AgentState(
                 pos=s["pos"].copy(),
