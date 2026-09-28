@@ -137,6 +137,7 @@ class MultiRacingEnv(ParallelEnv):
             "collision_count": s["collision_count"],
             "cumulative_distance": s["cumulative_distance"],
             "start_offset": s["start_offset"],
+            "lateral_ratio": abs(s["lateral"]) / self.track.half_width,
         }
 
     def step(self, actions: dict[str, np.ndarray]):

@@ -38,7 +38,9 @@ def main(args):
     leader_laps, follower_laps = [], []
     total_collisions, total_respawns, progress_gaps = [], [], []
     mean_speeds = {a: [] for a in AGENTS}
+    mean_laterals = {a: [] for a in AGENTS}
     leader_dist_laps, follower_dist_laps = [], []
+    ep_min_dists, ep_close_fractions = [], []
 
     print(f"Evaluating {args.checkpoint} over {args.episodes} episodes...")
 
@@ -52,8 +54,17 @@ def main(args):
         
         ep_solo_crashes = 0
         ep_col_crashes = 0
+        ep_speed_sum = {a: 0.0 for a in AGENTS}
+        ep_lateral_sum = {a: 0.0 for a in AGENTS}
+        ep_min_dist = float("inf")
+        ep_close_steps = 0
 
+        ep_steps = 0
         while not done:
+            ep_steps += 1
+            dist = np.linalg.norm(env._state[AGENTS[0]]["pos"] - env._state[AGENTS[1]]["pos"])
+            ep_min_dist = min(ep_min_dist, dist)
+            if dist < 18: ep_close_steps += 1
             if model is None:
                 actions = {a: env.action_space(a).sample() for a in AGENTS}
             else:
@@ -64,8 +75,14 @@ def main(args):
             obs_dict, _, _, trunc_dict, info_dict = env.step(actions)
             ep_infos = info_dict
             done = any(trunc_dict.values())
+            for a in AGENTS:
+                s = info_dict[a]
+                expected_max_laps = int((s["cumulative_distance"] + s["start_offset"]) / env.track.total_length)
+                assert s["laps"] <= expected_max_laps, f"Spurious lap in eval: {s["laps"]} > {expected_max_laps}"
             
             for a in AGENTS:
+                ep_speed_sum[a] += info_dict[a]["speed"]
+                ep_lateral_sum[a] += info_dict[a]["lateral_ratio"]
                 if info_dict[a].get("collision", False):
                     steps_since_collision[a] = 0
                 else:
@@ -96,7 +113,8 @@ def main(args):
         # Calculate pacing in laps based on distance traveled
         for a in AGENTS:
             dist_laps = ep_infos[a]["cumulative_distance"] / env.track.total_length
-            mean_speeds[a].append(ep_infos[a]["speed"])
+            mean_speeds[a].append(ep_speed_sum[a] / ep_steps)
+            mean_laterals[a].append(ep_lateral_sum[a] / ep_steps)
             if a == leader:
                 leader_dist_laps.append(dist_laps)
             else:
@@ -104,6 +122,8 @@ def main(args):
         
         total_collisions.append(ep_infos[AGENTS[0]]["collision_count"])
         total_respawns.append(ep_solo_crashes + ep_col_crashes)
+        ep_min_dists.append(ep_min_dist)
+        ep_close_fractions.append(ep_close_steps / ep_steps)
         
         print(f"Ep {ep+1}/{args.episodes}: Leader Laps={leader_laps[-1]:.2f}, "
               f"Follower Laps={follower_laps[-1]:.2f}, Collisions={total_collisions[-1]}, "
@@ -122,6 +142,8 @@ def main(args):
     mean_follower_pace = (statistics.mean(follower_dist_laps) / 2000.0) * 1000.0
     mean_leader_speed = statistics.mean(mean_speeds[leader]) if leader in mean_speeds else 0.0
     mean_follower_speed = statistics.mean(mean_speeds[follower]) if follower in mean_speeds else 0.0
+    mean_leader_lat = statistics.mean(mean_laterals[leader]) if leader in mean_laterals else 0.0
+    mean_follower_lat = statistics.mean(mean_laterals[follower]) if follower in mean_laterals else 0.0
     
     # 25 units is roughly 0.02 laps. If follower is more than 0.1 laps ahead, it's a bug.
     if mean_leader < mean_follower - 0.1:
@@ -133,8 +155,16 @@ def main(args):
     print(f"Follower Integer Laps: {mean_follower:.2f} ± {statistics.stdev(follower_laps) if len(follower_laps) > 1 else 0:.2f}")
     print(f"Leader Pace (Laps/1k):   {mean_leader_pace:.4f} (Avg Speed: {mean_leader_speed:.1f})")
     print(f"Follower Pace (Laps/1k): {mean_follower_pace:.4f} (Avg Speed: {mean_follower_speed:.1f})")
+    print(f"Leader Lateral Ratio:   {mean_leader_lat:.4f}")
+    print(f"Follower Lateral Ratio: {mean_follower_lat:.4f}")
     print(f"Progress Gap:  {statistics.mean(progress_gaps):.4f}")
     print(f"Mean Collisions/Ep: {statistics.mean(total_collisions):.2f}")
+    
+    if ep_min_dists:
+        print(f"Mean Min Inter-Car Dist: {statistics.mean(ep_min_dists):.2f} ± {statistics.stdev(ep_min_dists) if len(ep_min_dists) > 1 else 0:.2f}")
+        print(f"Fraction steps dist < 18: {statistics.mean(ep_close_fractions):.4f}")
+    print(f"Mean Min Inter-Car Dist: {statistics.mean(ep_min_dists):.2f} ± {statistics.stdev(ep_min_dists):.2f}")
+    print(f"Fraction steps dist < 18: {statistics.mean(ep_close_fractions):.4f}")
     
     agent_steps = args.episodes * 2000 * 2
     solo_rate = (env._global_solo / agent_steps) * 1000
