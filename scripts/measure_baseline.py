@@ -3,9 +3,14 @@ import numpy as np
 from stable_baselines3 import PPO
 from src.env.racing_env import RacingEnv
 
-def measure_baseline(checkpoint_path: str, num_episodes: int, deterministic: bool):
-    env = RacingEnv(render_mode="rgb_array") # no render to go fast
-    model = PPO.load(checkpoint_path)
+def measure_baseline(checkpoint_path: str, num_episodes: int, deterministic: bool, random_policy: bool = False):
+    env = RacingEnv(render_mode="rgb_array")
+    
+    if random_policy:
+        print("Using RANDOM policy for sanity check...")
+        model = None
+    else:
+        model = PPO.load(checkpoint_path)
     
     total_steps = 0
     total_crashes = 0
@@ -14,7 +19,10 @@ def measure_baseline(checkpoint_path: str, num_episodes: int, deterministic: boo
         obs, _ = env.reset(seed=42 + ep)
         done = False
         while not done:
-            action, _ = model.predict(obs, deterministic=deterministic)
+            if model is None:
+                action = env.action_space.sample()
+            else:
+                action, _ = model.predict(obs, deterministic=deterministic)
             obs, reward, terminated, truncated, info = env.step(action)
             total_steps += 1
             
@@ -35,8 +43,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", default="checkpoints/single/slipstream-single-v1-ae7d617/final")
     parser.add_argument("--episodes", type=int, default=50)
+    parser.add_argument("--random", action="store_true", help="Run a random policy sanity check")
     args = parser.parse_args()
     
-    print(f"Measuring baseline for: {args.checkpoint}")
-    measure_baseline(args.checkpoint, args.episodes, deterministic=True)
-    measure_baseline(args.checkpoint, args.episodes, deterministic=False)
+    if args.random:
+        measure_baseline("", args.episodes, deterministic=False, random_policy=True)
+    else:
+        print(f"Measuring baseline for: {args.checkpoint}")
+        measure_baseline(args.checkpoint, args.episodes, deterministic=True)
+        measure_baseline(args.checkpoint, args.episodes, deterministic=False)

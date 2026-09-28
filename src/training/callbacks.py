@@ -143,6 +143,11 @@ class WandbEvalCallback(BaseCallback):
         self._eval_env.close()
 
 
+def batch_predict(model, obs_dict: dict, agents: list[str], deterministic: bool = True) -> dict[str, np.ndarray]:
+    obs_batch = np.stack([obs_dict[a] for a in agents])
+    actions_batch, _ = model.predict(obs_batch, deterministic=deterministic)
+    return {a: actions_batch[i] for i, a in enumerate(agents)}
+
 class MultiEvalCallback(BaseCallback):
     GAP_EPS_FRAC = 0.005
 
@@ -169,9 +174,7 @@ class MultiEvalCallback(BaseCallback):
             ep_infos: dict = {a: {} for a in _MULTI_AGENTS}
 
             while not done:
-                obs_batch = np.stack([obs_dict[a] for a in _MULTI_AGENTS])
-                actions_batch, _ = self.model.predict(obs_batch, deterministic=True)
-                actions = {a: actions_batch[i] for i, a in enumerate(_MULTI_AGENTS)}
+                actions = batch_predict(self.model, obs_dict, list(_MULTI_AGENTS), deterministic=True)
                 
                 obs_dict, _, _, trunc_dict, info_dict = self._eval_env.step(actions)
                 ep_infos = info_dict

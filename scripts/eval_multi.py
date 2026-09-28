@@ -14,6 +14,25 @@ def main():
     env = MultiRacingEnv()
     model = PPO.load(args.checkpoint)
 
+    # Auto-patch if testing step-0 single agent model directly
+    single_input_dim = model.policy.mlp_extractor.policy_net[0].weight.shape[1]
+    if single_input_dim == 11:
+        import torch
+        from gymnasium.spaces import Box
+        
+        model.observation_space = Box(low=-np.inf, high=np.inf, shape=(15,), dtype=np.float32)
+        model.policy.observation_space = model.observation_space
+        
+        def _patch_net(net):
+            with torch.no_grad():
+                w_single = net[0].weight.data
+                w_multi = torch.zeros((net[0].out_features, 15), device=w_single.device)
+                w_multi[:, :11] = w_single
+                net[0].weight.data = w_multi
+        
+        _patch_net(model.policy.mlp_extractor.policy_net)
+        _patch_net(model.policy.mlp_extractor.value_net)
+
     gap_eps = 0.005 * env.track.total_length
 
     leader_laps, follower_laps = [], []
@@ -26,6 +45,12 @@ def main():
         done = False
         ep_infos = {a: {} for a in AGENTS}
 
+        prev_respawns = {a: 0 for a in AGENTS}
+        steps_since_collision = {a: 9999 for a in AGENTS}
+        
+        ep_solo_crashes = 0
+        ep_col_crashes = 0
+
         while not done:
             obs_batch = np.stack([obs_dict[a] for a in AGENTS])
             actions_batch, _ = model.predict(obs_batch, deterministic=True)
@@ -34,6 +59,20 @@ def main():
             obs_dict, _, _, trunc_dict, info_dict = env.step(actions)
             ep_infos = info_dict
             done = any(trunc_dict.values())
+            
+            for a in AGENTS:
+                if info_dict[a].get("collision", False):
+                    steps_since_collision[a] = 0
+                else:
+                    steps_since_collision[a] += 1
+                
+                current_respawns = info_dict[a]["respawns"]
+                if current_respawns > prev_respawns[a]:
+                    if steps_since_collision[a] < 30:
+                        ep_col_crashes += 1
+                    else:
+                        ep_solo_crashes += 1
+                prev_respawns[a] = current_respawns
 
         dist = {a: ep_infos[a]["cumulative_distance"] for a in AGENTS}
         gap = abs(dist[AGENTS[0]] - dist[AGENTS[1]])
@@ -48,13 +87,18 @@ def main():
         leader_laps.append(ep_infos[leader]["laps"])
         follower_laps.append(ep_infos[follower]["laps"])
         
-        # In multi-agent, collisions are rising edges, shared by both.
-        # We can just count it for agent 0
         total_collisions.append(ep_infos[AGENTS[0]]["collision_count"])
-        total_respawns.append(ep_infos[AGENTS[0]]["respawns"] + ep_infos[AGENTS[1]]["respawns"])
+        total_respawns.append(ep_solo_crashes + ep_col_crashes)
         
         print(f"Ep {ep+1}/{args.episodes}: Leader Laps={leader_laps[-1]:.2f}, "
-              f"Follower Laps={follower_laps[-1]:.2f}, Collisions={total_collisions[-1]}")
+              f"Follower Laps={follower_laps[-1]:.2f}, Collisions={total_collisions[-1]}, "
+              f"Solo Crashes={ep_solo_crashes}, Col-Crashes={ep_col_crashes}")
+        
+        if not hasattr(env, '_global_solo'):
+            env._global_solo = 0
+            env._global_col = 0
+        env._global_solo += ep_solo_crashes
+        env._global_col += ep_col_crashes
 
     print("\n--- FINAL EVALUATION RESULTS ---")
     print(f"Leader Laps:   {statistics.mean(leader_laps):.2f} ± {statistics.stdev(leader_laps) if len(leader_laps) > 1 else 0:.2f}")
@@ -62,13 +106,15 @@ def main():
     print(f"Progress Gap:  {statistics.mean(progress_gaps):.4f}")
     print(f"Mean Collisions/Ep: {statistics.mean(total_collisions):.2f}")
     
-    # Crash rate per 1000 steps. 
-    # Total steps per episode = 3000. For two agents, total agent steps = 6000 per episode.
-    # We should define crash rate per 1000 environment steps (i.e., time). 
-    # So total steps = args.episodes * 3000
-    env_steps = args.episodes * 3000
-    crash_rate = (sum(total_collisions) / env_steps) * 1000
-    print(f"Crash Rate (per 1000 env steps): {crash_rate:.4f}")
+    agent_steps = args.episodes * 3000 * 2
+    solo_rate = (env._global_solo / agent_steps) * 1000
+    col_rate = (env._global_col / agent_steps) * 1000
+    total_rate = ((env._global_solo + env._global_col) / agent_steps) * 1000
+    
+    print(f"\nCrash Rates (per 1000 agent-steps):")
+    print(f"  Solo Crashes:            {solo_rate:.4f}")
+    print(f"  Collision-Induced:       {col_rate:.4f}")
+    print(f"  Total Respawns:          {total_rate:.4f}")
 
 if __name__ == "__main__":
     main()
