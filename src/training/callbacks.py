@@ -4,6 +4,7 @@ import json
 import statistics
 import subprocess
 from pathlib import Path
+import numpy as np
 
 import wandb
 from stable_baselines3.common.callbacks import BaseCallback
@@ -170,10 +171,10 @@ class MultiEvalCallback(BaseCallback):
             ep_infos: dict = {a: {} for a in _MULTI_AGENTS}
 
             while not done:
-                actions = {}
-                for a in _MULTI_AGENTS:
-                    action, _ = self.model.predict(obs_dict[a], deterministic=True)
-                    actions[a] = action
+                obs_batch = np.stack([obs_dict[a] for a in _MULTI_AGENTS])
+                actions_batch, _ = self.model.predict(obs_batch, deterministic=True)
+                actions = {a: actions_batch[i] for i, a in enumerate(_MULTI_AGENTS)}
+                
                 obs_dict, _, _, trunc_dict, info_dict = self._eval_env.step(actions)
                 ep_infos = info_dict
                 done = any(trunc_dict.values())

@@ -20,7 +20,7 @@ train:
   seed: 42
   checkpoint_freq: 100_000
   eval_freq: 25_000
-  eval_episodes: 20
+  eval_episodes: 5
   checkpoint_dir: checkpoints/multi
   run_name: slipstream-multi-v1
   group: multi-agent
