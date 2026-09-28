@@ -224,6 +224,9 @@ class MultiRacingEnv(ParallelEnv):
         if truncated:
             self.agents = []
 
+        if self.render_mode == "human":
+            self._render_frame()
+
         obs_agents = AGENTS if truncated else self.agents
         obs = {a: self._build_obs(a) for a in obs_agents}
 
