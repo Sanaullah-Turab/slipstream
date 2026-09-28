@@ -5,33 +5,33 @@ from stable_baselines3 import PPO
 
 from src.env.multi_racing_env import MultiRacingEnv, AGENTS
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint", default="checkpoints/multi/final")
-    parser.add_argument("--episodes", type=int, default=20)
-    args = parser.parse_args()
-
+def main(args):
     env = MultiRacingEnv()
-    model = PPO.load(args.checkpoint)
-
-    # Auto-patch if testing step-0 single agent model directly
-    single_input_dim = model.policy.mlp_extractor.policy_net[0].weight.shape[1]
-    if single_input_dim == 11:
-        import torch
-        from gymnasium.spaces import Box
+    
+    if args.random:
+        print("Using RANDOM policy for sanity check...")
+        model = None
+    else:
+        model = PPO.load(args.checkpoint)
         
-        model.observation_space = Box(low=-np.inf, high=np.inf, shape=(15,), dtype=np.float32)
-        model.policy.observation_space = model.observation_space
-        
-        def _patch_net(net):
-            with torch.no_grad():
-                w_single = net[0].weight.data
-                w_multi = torch.zeros((net[0].out_features, 15), device=w_single.device)
-                w_multi[:, :11] = w_single
-                net[0].weight.data = w_multi
-        
-        _patch_net(model.policy.mlp_extractor.policy_net)
-        _patch_net(model.policy.mlp_extractor.value_net)
+        # Auto-patch if testing step-0 single agent model directly
+        single_input_dim = model.policy.mlp_extractor.policy_net[0].weight.shape[1]
+        if single_input_dim == 11:
+            import torch
+            from gymnasium.spaces import Box
+            
+            model.observation_space = Box(low=-np.inf, high=np.inf, shape=(15,), dtype=np.float32)
+            model.policy.observation_space = model.observation_space
+            
+            def _patch_net(net):
+                with torch.no_grad():
+                    w_single = net[0].weight.data
+                    w_multi = torch.zeros((net[0].out_features, 15), device=w_single.device)
+                    w_multi[:, :11] = w_single
+                    net[0].weight.data = w_multi
+            
+            _patch_net(model.policy.mlp_extractor.policy_net)
+            _patch_net(model.policy.mlp_extractor.value_net)
 
     gap_eps = 0.005 * env.track.total_length
 
@@ -52,9 +52,12 @@ def main():
         ep_col_crashes = 0
 
         while not done:
-            obs_batch = np.stack([obs_dict[a] for a in AGENTS])
-            actions_batch, _ = model.predict(obs_batch, deterministic=True)
-            actions = {a: actions_batch[i] for i, a in enumerate(AGENTS)}
+            if model is None:
+                actions = {a: env.action_space(a).sample() for a in AGENTS}
+            else:
+                obs_batch = np.stack([obs_dict[a] for a in AGENTS])
+                actions_batch, _ = model.predict(obs_batch, deterministic=True)
+                actions = {a: actions_batch[i] for i, a in enumerate(AGENTS)}
             
             obs_dict, _, _, trunc_dict, info_dict = env.step(actions)
             ep_infos = info_dict
@@ -116,5 +119,17 @@ def main():
     print(f"  Collision-Induced:       {col_rate:.4f}")
     print(f"  Total Respawns:          {total_rate:.4f}")
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--checkpoint", default="checkpoints/multi/final")
+    parser.add_argument("--episodes", type=int, default=20)
+    parser.add_argument("--random", action="store_true", help="Run a random policy sanity check")
+    return parser.parse_args()
+
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    if args.random:
+        print(f"Evaluating RANDOM policy over {args.episodes} episodes...")
+    else:
+        print(f"Evaluating {args.checkpoint} over {args.episodes} episodes...")
+    main(args)
