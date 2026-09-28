@@ -272,7 +272,7 @@ class MultiRacingEnv(ParallelEnv):
             pygame.init()
             if self.render_mode == "human":
                 self._screen = pygame.display.set_mode((W, H))
-                pygame.display.set_caption("Slipstream — Multi Agent")
+                pygame.display.set_caption("Slipstream - Multi Agent")
             else:
                 self._screen = pygame.Surface((W, H))
             self._clock = pygame.time.Clock()

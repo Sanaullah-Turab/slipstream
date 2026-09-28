@@ -79,7 +79,7 @@ python src/training/train_single.py --config configs/ppo_config.yaml
 
 Multi-agent:
 ```bash
-python src/training/train_multi.py --config configs/ppo_config.yaml
+python src/training/train_multi.py --config configs/ab_test_A.yaml --warm-start checkpoints/single/slipstream-single-v1-ae7d617/final.zip
 ```
 
 For GPU runs, use `scripts/colab_train.ipynb` on Google Colab or Kaggle.
@@ -93,6 +93,6 @@ For GPU runs, use `scripts/colab_train.ipynb` on Google Colab or Kaggle.
 - [x] Reward system with isolated unit tests
 - [x] Single-agent PPO baseline
 - [x] Kinematic bicycle model car physics
-- [ ] PettingZoo multi-agent wrapper
+- [x] PettingZoo multi-agent wrapper (IPPO)
 - [ ] Competitive training with interaction-aware rewards
 - [ ] Evaluation suite, replay recording, and final report
