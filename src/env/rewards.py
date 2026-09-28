@@ -27,6 +27,8 @@ def _progress_reward(curr: AgentState, prev: AgentState, track: Track) -> float:
     delta = curr.arc_length - prev.arc_length
     if delta < -track.total_length / 2:
         delta += track.total_length
+    elif delta > track.total_length / 2:
+        delta -= track.total_length
     return max(0.0, delta / track.total_length)
 
 
