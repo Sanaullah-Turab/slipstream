@@ -52,10 +52,21 @@ def test_info_keys():
 
 
 def test_no_spurious_lap():
-    env = make_env(seed=7)
-    _, _, _, _, infos = env.step(zero_actions(env))
-    for a in AGENTS:
-        assert infos[a]["laps"] == 0
+    import math
+    env = MultiRacingEnv()
+    for seed in range(50):
+        env.reset(seed=seed)
+        start_offsets = {a: env._state[a]["arc_length"] for a in AGENTS}
+        for _ in range(50):
+            env.step({a: env.action_space(a).sample() for a in AGENTS})
+            for a in AGENTS:
+                s = env._state[a]
+                race_dist = start_offsets[a] + s["cumulative_distance"]
+                expected_max_laps = math.floor(race_dist / env.track.total_length)
+                assert s["laps"] <= expected_max_laps, (
+                    f"Spurious lap! Laps: {s['laps']}, Odo: {s['cumulative_distance']}, "
+                    f"Start: {start_offsets[a]}"
+                )
 
 
 def test_spawn_randomized():
