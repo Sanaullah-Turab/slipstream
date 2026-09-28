@@ -75,11 +75,12 @@ class MultiRacingEnv(ParallelEnv):
                 "lateral": ts.lateral,
                 "track_heading": ts.track_heading,
                 "arc_length": ts.arc_length,
-                "laps": 0,
+                "laps": -1 if ts.progress > 0.5 else 0,
                 "cumulative_distance": 0.0,
                 "respawns": 0,
                 "prev_colliding": False,
                 "collision_count": 0,
+                "start_offset": ts.arc_length,
             }
 
         obs = {a: self._build_obs(a) for a in self.agents}
@@ -135,6 +136,7 @@ class MultiRacingEnv(ParallelEnv):
             "respawns": s["respawns"],
             "collision_count": s["collision_count"],
             "cumulative_distance": s["cumulative_distance"],
+            "start_offset": s["start_offset"],
         }
 
     def step(self, actions: dict[str, np.ndarray]):

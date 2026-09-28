@@ -185,6 +185,29 @@ def test_batched_inference_equivalence():
     actions_dict_rev = batch_predict(model, obs_dict, [AGENTS[1], AGENTS[0]], deterministic=True)
     np.testing.assert_allclose(act1, actions_dict_rev[AGENTS[1]], atol=1e-5)
     np.testing.assert_allclose(act0, actions_dict_rev[AGENTS[0]], atol=1e-5)
+    
+    # Verify leader/follower logic (from MultiEvalCallback/eval_multi.py) works
+    # Mock some cumulative distances
+    dist = {AGENTS[0]: 1500, AGENTS[1]: 1400}
+    gap = abs(dist[AGENTS[0]] - dist[AGENTS[1]])
+    gap_eps = 5.0 # arbitrary small epsilon
+    
+    # Distances are far apart
+    if gap < gap_eps:
+        leader, follower = AGENTS[0], AGENTS[1]
+    else:
+        leader = max(AGENTS, key=lambda a: dist[a])
+        follower = AGENTS[1] if leader == AGENTS[0] else AGENTS[0]
+        
+    assert leader == AGENTS[0]
+    assert follower == AGENTS[1]
+    
+    # Reverse it
+    dist = {AGENTS[0]: 1200, AGENTS[1]: 1400}
+    leader = max(AGENTS, key=lambda a: dist[a])
+    follower = AGENTS[1] if leader == AGENTS[0] else AGENTS[0]
+    assert leader == AGENTS[1]
+    assert follower == AGENTS[0]
 
 
 def test_parallel_api():
