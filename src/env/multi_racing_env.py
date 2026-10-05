@@ -91,6 +91,7 @@ class MultiRacingEnv(ParallelEnv):
                 "respawns": 0,
                 "prev_colliding": False,
                 "collision_count": 0,
+                "steps_in_contact": 0,
                 "start_offset": ts.arc_length,
                 "lateral_history": [ts.lateral] * LATERAL_HISTORY_LEN,
                 "fault_log": {"follower": 0, "leader": 0, "neutral": 0},
@@ -164,7 +165,9 @@ class MultiRacingEnv(ParallelEnv):
             "progress": s["progress"],
             "speed": s["speed"],
             "respawns": s["respawns"],
+            "collision": s["prev_colliding"],
             "collision_count": s["collision_count"],
+            "steps_in_contact": s["steps_in_contact"],
             "cumulative_distance": s["cumulative_distance"],
             "start_offset": s["start_offset"],
             "lateral_ratio": abs(s["lateral"]) / self.track.half_width,
@@ -254,7 +257,8 @@ class MultiRacingEnv(ParallelEnv):
         )
 
         if overlapping:
-            # Rising edge counter
+            s0["steps_in_contact"] += 1
+            s1["steps_in_contact"] += 1
             if not s0["prev_colliding"]:
                 s0["collision_count"] += 1
                 s1["collision_count"] += 1
