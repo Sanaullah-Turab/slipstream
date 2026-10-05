@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+import math
 import numpy as np
 from pettingzoo import ParallelEnv
 from gymnasium import spaces
@@ -10,21 +11,26 @@ from .track import Track
 from .car import CarState, DEFAULT_PARAMS, DT, MAX_SPEED, CAR_HALF_WIDTH, step_physics
 from .racing_env import MAX_STEPS, MAX_HEADING_RATE, MAX_RAY_DIST
 from .rewards import compute_reward, AgentState
+from .collision import obb_overlap, resolve_collision, classify_contact
 
 AGENTS = ["agent_0", "agent_1"]
 SPAWN_OFFSET_IDX = 10
 MAX_OPP_DIST = 300.0
+CAR_HALF_LEN = 20.0
+CONTACT_PENALTY = -0.1
+LATERAL_HISTORY_LEN = 20
 
 class MultiRacingEnv(ParallelEnv):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30, "name": "multi_racing_v1"}
 
-    def __init__(self, render_mode: Optional[str] = None) -> None:
+    def __init__(self, render_mode: Optional[str] = None, enable_draft: bool = False) -> None:
         super().__init__()
         self.track = Track()
         self.render_mode = render_mode
+        self.enable_draft = enable_draft
         self.possible_agents = AGENTS[:]
 
-        self.observation_spaces = {a: spaces.Box(low=-1.0, high=1.0, shape=(15,), dtype=np.float32) for a in AGENTS}
+        self.observation_spaces = {a: spaces.Box(low=-2.0, high=2.0, shape=(19,), dtype=np.float32) for a in AGENTS}
         self.action_spaces = {
             a: spaces.Box(
                 low=np.array([-1.0, -1.0], dtype=np.float32),
@@ -81,6 +87,8 @@ class MultiRacingEnv(ParallelEnv):
                 "prev_colliding": False,
                 "collision_count": 0,
                 "start_offset": ts.arc_length,
+                "lateral_history": [ts.lateral] * LATERAL_HISTORY_LEN,
+                "fault_log": {"follower": 0, "leader": 0, "neutral": 0},
             }
 
         obs = {a: self._build_obs(a) for a in self.agents}
@@ -110,6 +118,19 @@ class MultiRacingEnv(ParallelEnv):
             np.clip((opp["lateral"] - s["lateral"]) / (2.0 * self.track.half_width), -1.0, 1.0)
         )
 
+        # Ego-frame opponent velocity components (dims 15-16)
+        opp_vel_world = opp["speed"] * np.array([math.cos(opp["heading"]), math.sin(opp["heading"])])
+        c, ss = math.cos(s["heading"]), math.sin(s["heading"])
+        opp_vel_ego_fwd = float(np.clip((c * opp_vel_world[0] + ss * opp_vel_world[1]) / MAX_SPEED, -1.0, 1.0))
+        opp_vel_ego_lat = float(np.clip((-ss * opp_vel_world[0] + c * opp_vel_world[1]) / MAX_SPEED, -1.0, 1.0))
+
+        # Relative heading (dim 17)
+        rel_heading = opp["heading"] - s["heading"]
+        opp_rel_heading = float(np.clip(math.sin(rel_heading), -1.0, 1.0))
+
+        # Draft flag continuous [0,1] (dim 18) - stub for 4.1, activated in 4.2
+        draft_flag = 0.0
+
         return np.array(
             [
                 s["speed"] / MAX_SPEED,
@@ -123,6 +144,10 @@ class MultiRacingEnv(ParallelEnv):
                 opp_progress_gap,
                 opp_rel_speed,
                 opp_lateral_gap,
+                opp_vel_ego_lat,
+                opp_rel_heading,
+                draft_flag,
+                draft_flag,  # is_being_drafted stub
             ],
             dtype=np.float32,
         )
@@ -138,6 +163,7 @@ class MultiRacingEnv(ParallelEnv):
             "cumulative_distance": s["cumulative_distance"],
             "start_offset": s["start_offset"],
             "lateral_ratio": abs(s["lateral"]) / self.track.half_width,
+            "fault_log": s["fault_log"].copy(),
         }
 
     def step(self, actions: dict[str, np.ndarray]):
@@ -187,6 +213,10 @@ class MultiRacingEnv(ParallelEnv):
                     arc_delta += self.track.total_length
                 s["cumulative_distance"] += max(0.0, arc_delta)
 
+            s["lateral_history"].append(ts.lateral)
+            if len(s["lateral_history"]) > LATERAL_HISTORY_LEN:
+                s["lateral_history"].pop(0)
+
             curr_state = AgentState(
                 pos=s["pos"].copy(),
                 heading=s["heading"],
@@ -210,13 +240,58 @@ class MultiRacingEnv(ParallelEnv):
 
         self._step_count += 1
 
-        # Collision detection (rising edges only)
+        # --- OBB collision detection and response ---
         s0, s1 = self._state[AGENTS[0]], self._state[AGENTS[1]]
-        colliding = float(np.linalg.norm(s0["pos"] - s1["pos"])) < 2.0 * CAR_HALF_WIDTH
+        overlapping, normal, _ = obb_overlap(
+            s0["pos"], s0["heading"],
+            s1["pos"], s1["heading"],
+            CAR_HALF_LEN, CAR_HALF_WIDTH,
+        )
+
+        if overlapping:
+            # Rising edge counter
+            if not s0["prev_colliding"]:
+                s0["collision_count"] += 1
+                s1["collision_count"] += 1
+
+                # Determine leader by cumulative distance
+                if s0["cumulative_distance"] >= s1["cumulative_distance"]:
+                    leader_agent, follower_agent = AGENTS[0], AGENTS[1]
+                    leader_s, follower_s = s0, s1
+                else:
+                    leader_agent, follower_agent = AGENTS[1], AGENTS[0]
+                    leader_s, follower_s = s1, s0
+
+                fault = classify_contact(
+                    normal=normal,
+                    heading_leader=leader_s["heading"],
+                    vel_a=s0["speed"] * np.array([math.cos(s0["heading"]), math.sin(s0["heading"])]),
+                    vel_b=s1["speed"] * np.array([math.cos(s1["heading"]), math.sin(s1["heading"])]),
+                    leader_id=0 if leader_agent == AGENTS[0] else 1,
+                    lateral_history_leader=leader_s["lateral_history"],
+                    follower_lateral=follower_s["lateral"],
+                )
+                if fault == "follower_fault":
+                    follower_s["fault_log"]["follower"] += 1
+                elif fault == "leader_fault":
+                    leader_s["fault_log"]["leader"] += 1
+                else:
+                    leader_s["fault_log"]["neutral"] += 1
+                    follower_s["fault_log"]["neutral"] += 1
+
+                # Apply symmetric contact penalty to both agents (penalties off by design in 4.1)
+                rewards[AGENTS[0]] += CONTACT_PENALTY
+                rewards[AGENTS[1]] += CONTACT_PENALTY
+
+            # Momentum transfer via impulse resolution
+            vel0 = s0["speed"] * np.array([math.cos(s0["heading"]), math.sin(s0["heading"])])
+            vel1 = s1["speed"] * np.array([math.cos(s1["heading"]), math.sin(s1["heading"])])
+            vel0_new, vel1_new = resolve_collision(s0["pos"], vel0, s1["pos"], vel1, normal)
+            s0["speed"] = float(np.clip(np.linalg.norm(vel0_new), 0.0, MAX_SPEED))
+            s1["speed"] = float(np.clip(np.linalg.norm(vel1_new), 0.0, MAX_SPEED))
+
         for s in (s0, s1):
-            if colliding and not s["prev_colliding"]:
-                s["collision_count"] += 1
-            s["prev_colliding"] = colliding
+            s["prev_colliding"] = overlapping
 
         truncated = self._step_count >= MAX_STEPS
 
