@@ -282,6 +282,8 @@ class MultiRacingEnv(ParallelEnv):
                 if not s0["prev_colliding"]:
                     s0["collision_count"] += 1
                     s1["collision_count"] += 1
+                    rewards[AGENTS[0]] += self.contact_penalty
+                    rewards[AGENTS[1]] += self.contact_penalty
 
                 # Determine leader by cumulative distance
                 if s0["cumulative_distance"] >= s1["cumulative_distance"]:
@@ -308,15 +310,12 @@ class MultiRacingEnv(ParallelEnv):
                     leader_s["fault_log"]["neutral"] += 1
                     follower_s["fault_log"]["neutral"] += 1
 
-                rewards[AGENTS[0]] += self.contact_penalty
-                rewards[AGENTS[1]] += self.contact_penalty
-
-            # Momentum transfer via impulse resolution
-            vel0 = s0["speed"] * np.array([math.cos(s0["heading"]), math.sin(s0["heading"])])
-            vel1 = s1["speed"] * np.array([math.cos(s1["heading"]), math.sin(s1["heading"])])
-            vel0_new, vel1_new = resolve_collision(s0["pos"], vel0, s1["pos"], vel1, normal)
-            s0["speed"] = float(np.clip(np.linalg.norm(vel0_new), 0.0, MAX_SPEED))
-            s1["speed"] = float(np.clip(np.linalg.norm(vel1_new), 0.0, MAX_SPEED))
+                # Momentum transfer via impulse resolution
+                vel0 = s0["speed"] * np.array([math.cos(s0["heading"]), math.sin(s0["heading"])])
+                vel1 = s1["speed"] * np.array([math.cos(s1["heading"]), math.sin(s1["heading"])])
+                vel0_new, vel1_new = resolve_collision(s0["pos"], vel0, s1["pos"], vel1, normal)
+                s0["speed"] = float(np.clip(np.linalg.norm(vel0_new), 0.0, MAX_SPEED))
+                s1["speed"] = float(np.clip(np.linalg.norm(vel1_new), 0.0, MAX_SPEED))
 
             for s in (s0, s1):
                 s["prev_colliding"] = overlapping
