@@ -11,7 +11,11 @@ from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.monitor import Monitor
 
 from src.env.car import DT
-from src.env.multi_racing_env import MultiRacingEnv as _MultiRacingEnv, AGENTS as _MULTI_AGENTS
+from src.env.multi_racing_env import (
+    MultiRacingEnv as _MultiRacingEnv,
+    AGENTS as _MULTI_AGENTS,
+    aggregate_fault_counts as _aggregate_fault_counts,
+)
 from src.env.racing_env import RacingEnv
 
 
@@ -216,11 +220,10 @@ class MultiEvalCallback(BaseCallback):
             total_collisions.append(ep_infos[_MULTI_AGENTS[0]]["collision_count"])
             total_contact_steps.append(ep_infos[_MULTI_AGENTS[0]].get("steps_in_contact", 0))
 
-            f_log = ep_infos[follower].get("fault_log", {})
-            l_log = ep_infos[leader].get("fault_log", {})
-            faults_follower.append(f_log.get("follower", 0))
-            faults_leader.append(l_log.get("leader", 0))
-            faults_neutral.append(f_log.get("neutral", 0))
+            fault_counts = _aggregate_fault_counts(ep_infos, _MULTI_AGENTS)
+            faults_follower.append(fault_counts["follower"])
+            faults_leader.append(fault_counts["leader"])
+            faults_neutral.append(fault_counts["neutral"])
 
             total_respawns.append(
                 ep_infos[_MULTI_AGENTS[0]]["respawns"] + ep_infos[_MULTI_AGENTS[1]]["respawns"]

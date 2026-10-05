@@ -3,7 +3,7 @@ import statistics
 import numpy as np
 from stable_baselines3 import PPO
 
-from src.env.multi_racing_env import MultiRacingEnv, AGENTS
+from src.env.multi_racing_env import MultiRacingEnv, AGENTS, aggregate_fault_counts
 
 FINISH_LINE_TOLERANCE = 7.0
 
@@ -133,9 +133,11 @@ def main(args):
         total_collisions.append(ep_infos[AGENTS[0]]["collision_count"])
         total_contact_steps.append(ep_infos[AGENTS[0]].get("steps_in_contact", 0))
         total_respawns.append(ep_solo_crashes + ep_col_crashes)
-        faults_follower.append(ep_infos[follower].get("fault_log", {}).get("follower", 0))
-        faults_leader.append(ep_infos[leader].get("fault_log", {}).get("leader", 0))
-        faults_neutral.append(ep_infos[AGENTS[0]].get("fault_log", {}).get("neutral", 0))
+        fault_counts = aggregate_fault_counts(ep_infos, AGENTS)
+        faults_follower.append(fault_counts["follower"])
+        faults_leader.append(fault_counts["leader"])
+        faults_neutral.append(fault_counts["neutral"])
+        assert faults_follower[-1] + faults_leader[-1] + faults_neutral[-1] == total_collisions[-1]
         ep_min_dists.append(ep_min_dist)
         ep_close_fractions.append(ep_close_steps / ep_steps)
         

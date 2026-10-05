@@ -19,6 +19,15 @@ MAX_OPP_DIST = 300.0
 CAR_HALF_LEN = 20.0
 LATERAL_HISTORY_LEN = 20
 
+
+def aggregate_fault_counts(ep_infos: dict, agents: list[str] = AGENTS) -> dict[str, int]:
+    return {
+        "follower": sum(ep_infos[a].get("fault_log", {}).get("follower", 0) for a in agents),
+        "leader": sum(ep_infos[a].get("fault_log", {}).get("leader", 0) for a in agents),
+        "neutral": max((ep_infos[a].get("fault_log", {}).get("neutral", 0) for a in agents), default=0),
+    }
+
+
 class MultiRacingEnv(ParallelEnv):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30, "name": "multi_racing_v1"}
 
