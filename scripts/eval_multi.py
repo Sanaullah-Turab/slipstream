@@ -6,7 +6,7 @@ from stable_baselines3 import PPO
 from src.env.multi_racing_env import MultiRacingEnv, AGENTS
 
 def main(args):
-    env = MultiRacingEnv()
+    env = MultiRacingEnv(legacy_collision=args.legacy_env)
     
     if args.random:
         print("Using RANDOM policy for sanity check...")
@@ -14,22 +14,22 @@ def main(args):
     else:
         model = PPO.load(args.checkpoint)
         
-        # Auto-patch if testing step-0 single agent model directly
+        target_dim = env.observation_space(AGENTS[0]).shape[0]
         first_layer = getattr(model.policy.mlp_extractor.policy_net, "0")
         single_input_dim = first_layer.weight.shape[1]
-        if single_input_dim == 11:
+        if single_input_dim < target_dim:
             import torch
             from gymnasium.spaces import Box
             
-            model.observation_space = Box(low=-np.inf, high=np.inf, shape=(15,), dtype=np.float32)
+            model.observation_space = Box(low=-np.inf, high=np.inf, shape=(target_dim,), dtype=np.float32)
             model.policy.observation_space = model.observation_space
             
             def _patch_net(net):
                 with torch.no_grad():
                     first = getattr(net, "0")
                     w_single = first.weight.data
-                    w_multi = torch.zeros((first.out_features, 15), device=w_single.device)
-                    w_multi[:, :11] = w_single
+                    w_multi = torch.zeros((first.out_features, target_dim), device=w_single.device)
+                    w_multi[:, :single_input_dim] = w_single
                     first.weight.data = w_multi
             
             _patch_net(model.policy.mlp_extractor.policy_net)
@@ -38,7 +38,9 @@ def main(args):
     gap_eps = 0.005 * env.track.total_length
 
     leader_laps, follower_laps = [], []
-    total_collisions, total_respawns, progress_gaps = [], [], []
+    total_collisions, total_contact_steps = [], []
+    total_respawns, progress_gaps = [], []
+    faults_follower, faults_leader, faults_neutral = [], [], []
     mean_speeds = {a: [] for a in AGENTS}
     mean_laterals = {a: [] for a in AGENTS}
     leader_dist_laps, follower_dist_laps = [], []
@@ -127,7 +129,11 @@ def main(args):
                 follower_dist_laps.append(dist_laps)
         
         total_collisions.append(ep_infos[AGENTS[0]]["collision_count"])
+        total_contact_steps.append(ep_infos[AGENTS[0]].get("steps_in_contact", 0))
         total_respawns.append(ep_solo_crashes + ep_col_crashes)
+        faults_follower.append(ep_infos[follower].get("fault_log", {}).get("follower", 0))
+        faults_leader.append(ep_infos[leader].get("fault_log", {}).get("leader", 0))
+        faults_neutral.append(ep_infos[AGENTS[0]].get("fault_log", {}).get("neutral", 0))
         ep_min_dists.append(ep_min_dist)
         ep_close_fractions.append(ep_close_steps / ep_steps)
         
@@ -148,26 +154,27 @@ def main(args):
     mean_leader_lat = statistics.mean(mean_laterals[leader]) if leader in mean_laterals else 0.0
     mean_follower_lat = statistics.mean(mean_laterals[follower]) if follower in mean_laterals else 0.0
     
-    # 25 units is roughly 0.02 laps. If follower is more than 0.1 laps ahead, it's a bug.
     if mean_leader < mean_follower - 0.1:
         print(f"\nWARNING: Leader mean integer laps ({mean_leader:.2f}) < Follower mean integer laps ({mean_follower:.2f}). "
               f"This indicates a bug in lap counting vs cumulative distance due to spawn offsets crossing the start line.")
               
     print("\n--- FINAL EVALUATION RESULTS ---")
-    print(f"Leader Integer Laps:   {mean_leader:.2f} ± {statistics.stdev(leader_laps) if len(leader_laps) > 1 else 0:.2f}")
-    print(f"Follower Integer Laps: {mean_follower:.2f} ± {statistics.stdev(follower_laps) if len(follower_laps) > 1 else 0:.2f}")
+    print(f"Leader Integer Laps:     {mean_leader:.2f} ± {statistics.stdev(leader_laps) if len(leader_laps) > 1 else 0:.2f}")
+    print(f"Follower Integer Laps:   {mean_follower:.2f} ± {statistics.stdev(follower_laps) if len(follower_laps) > 1 else 0:.2f}")
     print(f"Leader Pace (Laps/1k):   {mean_leader_pace:.4f} (Avg Speed: {mean_leader_speed:.1f})")
     print(f"Follower Pace (Laps/1k): {mean_follower_pace:.4f} (Avg Speed: {mean_follower_speed:.1f})")
-    print(f"Leader Lateral Ratio:   {mean_leader_lat:.4f}")
-    print(f"Follower Lateral Ratio: {mean_follower_lat:.4f}")
-    print(f"Progress Gap:  {statistics.mean(progress_gaps):.4f}")
-    print(f"Mean Collisions/Ep: {statistics.mean(total_collisions):.2f}")
+    print(f"Leader Lateral Ratio:    {mean_leader_lat:.4f}")
+    print(f"Follower Lateral Ratio:  {mean_follower_lat:.4f}")
+    print(f"Progress Gap:            {statistics.mean(progress_gaps):.4f}")
+    print(f"Contact Events/Ep:       {statistics.mean(total_collisions):.2f}")
+    print(f"Steps in Contact/Ep:     {statistics.mean(total_contact_steps):.2f}")
+    print(f"Fault Counts (total):    Follower={sum(faults_follower)}, Leader={sum(faults_leader)}, Neutral={sum(faults_neutral)}")
+    print(f"Fault Counts (per ep):   Follower={statistics.mean(faults_follower):.2f}, Leader={statistics.mean(faults_leader):.2f}, Neutral={statistics.mean(faults_neutral):.2f}")
+    print(f"Respawns/Ep:             {statistics.mean(total_respawns):.2f}")
     
     if ep_min_dists:
         print(f"Mean Min Inter-Car Dist: {statistics.mean(ep_min_dists):.2f} ± {statistics.stdev(ep_min_dists) if len(ep_min_dists) > 1 else 0:.2f}")
         print(f"Fraction steps dist < 18: {statistics.mean(ep_close_fractions):.4f}")
-    print(f"Mean Min Inter-Car Dist: {statistics.mean(ep_min_dists):.2f} ± {statistics.stdev(ep_min_dists):.2f}")
-    print(f"Fraction steps dist < 18: {statistics.mean(ep_close_fractions):.4f}")
     
     agent_steps = args.episodes * 2000 * 2
     solo_rate = (global_solo / agent_steps) * 1000
@@ -179,12 +186,14 @@ def main(args):
     print(f"  Collision-Induced:       {col_rate:.4f}")
     print(f"  Total Respawns:          {total_rate:.4f}")
 
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", default="checkpoints/multi/final")
     parser.add_argument("--episodes", type=int, default=20)
     parser.add_argument("--random", action="store_true", help="Run a random policy sanity check")
     parser.add_argument("--stochastic", action="store_true", help="Sample actions instead of deterministic")
+    parser.add_argument("--legacy-env", action="store_true", help="Use legacy circle/ghost environment")
     return parser.parse_args()
 
 if __name__ == "__main__":

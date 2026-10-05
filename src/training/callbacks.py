@@ -166,21 +166,41 @@ class MultiEvalCallback(BaseCallback):
             return True
 
         leader_laps, follower_laps = [], []
-        total_collisions, total_respawns, progress_gaps = [], [], []
-        pace, speed = 0.0, 0.0
+        total_collisions, total_contact_steps = [], []
+        total_respawns, progress_gaps = [], []
+        leader_paces, leader_speeds = [], []
+        faults_follower, faults_leader, faults_neutral = [], [], []
+        global_col_crashes, global_solo_crashes = 0, 0
+        total_steps = 0
+
         for ep in range(self.n_episodes):
             obs_dict, _ = self._eval_env.reset(seed=2000 + ep)
             done = False
             ep_infos: dict = {a: {} for a in _MULTI_AGENTS}
+            prev_respawns = {a: 0 for a in _MULTI_AGENTS}
+            steps_since_collision = {a: 9999 for a in _MULTI_AGENTS}
 
             while not done:
+                total_steps += 1
                 actions = batch_predict(self.model, obs_dict, list(_MULTI_AGENTS), deterministic=True)
-                
                 obs_dict, _, _, trunc_dict, info_dict = self._eval_env.step(actions)
                 ep_infos = info_dict
                 done = any(trunc_dict.values())
 
-            dist = {a: ep_infos[a]["cumulative_distance"] for a in _MULTI_AGENTS}
+                for a in _MULTI_AGENTS:
+                    if info_dict[a].get("collision", False):
+                        steps_since_collision[a] = 0
+                    else:
+                        steps_since_collision[a] += 1
+
+                    current_respawns = info_dict[a]["respawns"]
+                    if current_respawns > prev_respawns[a]:
+                        if steps_since_collision[a] < 30:
+                            global_col_crashes += 1
+                        else:
+                            global_solo_crashes += 1
+                    prev_respawns[a] = current_respawns
+
             race_pos = {a: ep_infos[a]["cumulative_distance"] + ep_infos[a].get("start_offset", 0.0) for a in _MULTI_AGENTS}
             gap = abs(race_pos[_MULTI_AGENTS[0]] - race_pos[_MULTI_AGENTS[1]])
             progress_gaps.append(gap / self._track_length)
@@ -194,26 +214,43 @@ class MultiEvalCallback(BaseCallback):
             leader_laps.append(ep_infos[leader]["laps"])
             follower_laps.append(ep_infos[follower]["laps"])
             total_collisions.append(ep_infos[_MULTI_AGENTS[0]]["collision_count"])
+            total_contact_steps.append(ep_infos[_MULTI_AGENTS[0]].get("steps_in_contact", 0))
+
+            f_log = ep_infos[follower].get("fault_log", {})
+            l_log = ep_infos[leader].get("fault_log", {})
+            faults_follower.append(f_log.get("follower", 0))
+            faults_leader.append(l_log.get("leader", 0))
+            faults_neutral.append(f_log.get("neutral", 0))
+
             total_respawns.append(
                 ep_infos[_MULTI_AGENTS[0]]["respawns"] + ep_infos[_MULTI_AGENTS[1]]["respawns"]
             )
-            
-            # Pace (Laps per 1000 steps)
+
             leader_dist_laps = race_pos[leader] / self._track_length
-            pace = (leader_dist_laps / 2000.0) * 1000.0
-            speed = pace * self._track_length / 1000.0  # approximate mean speed
-            # Here we just take the last episode's pace for simplicity since they are all 2000 steps
-            
+            ep_pace = (leader_dist_laps / 2000.0) * 1000.0
+            leader_paces.append(ep_pace)
+            leader_speeds.append(ep_pace * self._track_length / 1000.0)
+
+        total_agent_steps = max(1, total_steps * 2)
+        col_crash_rate = (global_col_crashes / total_agent_steps) * 1000.0
+        solo_crash_rate = (global_solo_crashes / total_agent_steps) * 1000.0
+
         logs = {
             "eval/leader/mean_laps": sum(leader_laps) / self.n_episodes,
             "eval/leader/std_laps": statistics.stdev(leader_laps) if len(leader_laps) > 1 else 0.0,
             "eval/follower/mean_laps": sum(follower_laps) / self.n_episodes,
             "eval/follower/std_laps": statistics.stdev(follower_laps) if len(follower_laps) > 1 else 0.0,
             "eval/mean_collisions_per_ep": sum(total_collisions) / self.n_episodes,
+            "eval/mean_steps_in_contact_per_ep": sum(total_contact_steps) / self.n_episodes,
+            "eval/faults/follower_per_ep": sum(faults_follower) / self.n_episodes,
+            "eval/faults/leader_per_ep": sum(faults_leader) / self.n_episodes,
+            "eval/faults/neutral_per_ep": sum(faults_neutral) / self.n_episodes,
+            "eval/collision_crash_rate_per_1k": col_crash_rate,
+            "eval/solo_crash_rate_per_1k": solo_crash_rate,
             "eval/mean_respawns_per_ep": sum(total_respawns) / self.n_episodes,
             "eval/mean_progress_gap": sum(progress_gaps) / self.n_episodes,
-            "eval/leader/mean_pace_dist": pace,
-            "eval/leader/mean_speed": speed,
+            "eval/leader/mean_pace_dist": sum(leader_paces) / self.n_episodes,
+            "eval/leader/mean_speed": sum(leader_speeds) / self.n_episodes,
         }
         wandb.log(logs, step=self.num_timesteps)
         return True
