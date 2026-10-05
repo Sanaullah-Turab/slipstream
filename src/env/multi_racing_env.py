@@ -10,7 +10,7 @@ from gymnasium import spaces
 from .track import Track
 from .car import CarState, DEFAULT_PARAMS, DT, MAX_SPEED, CAR_HALF_WIDTH, step_physics
 from .racing_env import MAX_STEPS, MAX_HEADING_RATE, MAX_RAY_DIST
-from .rewards import compute_reward, AgentState, DEFAULT_CONTACT_PENALTY
+from .rewards import compute_reward, AgentState, DEFAULT_CONTACT_PENALTY, DEFAULT_CONTACT_STEP_PENALTY
 from .collision import obb_overlap, resolve_collision, classify_contact
 
 AGENTS = ["agent_0", "agent_1"]
@@ -27,6 +27,7 @@ class MultiRacingEnv(ParallelEnv):
         render_mode: Optional[str] = None,
         enable_draft: bool = False,
         contact_penalty: float = DEFAULT_CONTACT_PENALTY,
+        contact_step_penalty: float = DEFAULT_CONTACT_STEP_PENALTY,
         legacy_collision: bool = False,
     ) -> None:
         super().__init__()
@@ -34,6 +35,7 @@ class MultiRacingEnv(ParallelEnv):
         self.render_mode = render_mode
         self.enable_draft = enable_draft
         self.contact_penalty = contact_penalty
+        self.contact_step_penalty = contact_step_penalty
         self.legacy_collision = legacy_collision
         self.possible_agents = AGENTS[:]
 
@@ -279,36 +281,38 @@ class MultiRacingEnv(ParallelEnv):
             if overlapping:
                 s0["steps_in_contact"] += 1
                 s1["steps_in_contact"] += 1
+                rewards[AGENTS[0]] += self.contact_step_penalty
+                rewards[AGENTS[1]] += self.contact_step_penalty
                 if not s0["prev_colliding"]:
                     s0["collision_count"] += 1
                     s1["collision_count"] += 1
                     rewards[AGENTS[0]] += self.contact_penalty
                     rewards[AGENTS[1]] += self.contact_penalty
 
-                # Determine leader by cumulative distance
-                if s0["cumulative_distance"] >= s1["cumulative_distance"]:
-                    leader_agent, follower_agent = AGENTS[0], AGENTS[1]
-                    leader_s, follower_s = s0, s1
-                else:
-                    leader_agent, follower_agent = AGENTS[1], AGENTS[0]
-                    leader_s, follower_s = s1, s0
+                    # Determine leader by cumulative distance
+                    if s0["cumulative_distance"] >= s1["cumulative_distance"]:
+                        leader_agent, follower_agent = AGENTS[0], AGENTS[1]
+                        leader_s, follower_s = s0, s1
+                    else:
+                        leader_agent, follower_agent = AGENTS[1], AGENTS[0]
+                        leader_s, follower_s = s1, s0
 
-                fault = classify_contact(
-                    normal=normal,
-                    heading_leader=leader_s["heading"],
-                    vel_a=s0["speed"] * np.array([math.cos(s0["heading"]), math.sin(s0["heading"])]),
-                    vel_b=s1["speed"] * np.array([math.cos(s1["heading"]), math.sin(s1["heading"])]),
-                    leader_id=0 if leader_agent == AGENTS[0] else 1,
-                    lateral_history_leader=leader_s["lateral_history"],
-                    follower_lateral=follower_s["lateral"],
-                )
-                if fault == "follower_fault":
-                    follower_s["fault_log"]["follower"] += 1
-                elif fault == "leader_fault":
-                    leader_s["fault_log"]["leader"] += 1
-                else:
-                    leader_s["fault_log"]["neutral"] += 1
-                    follower_s["fault_log"]["neutral"] += 1
+                    fault = classify_contact(
+                        normal=normal,
+                        heading_leader=leader_s["heading"],
+                        vel_a=s0["speed"] * np.array([math.cos(s0["heading"]), math.sin(s0["heading"])]),
+                        vel_b=s1["speed"] * np.array([math.cos(s1["heading"]), math.sin(s1["heading"])]),
+                        leader_id=0 if leader_agent == AGENTS[0] else 1,
+                        lateral_history_leader=leader_s["lateral_history"],
+                        follower_lateral=follower_s["lateral"],
+                    )
+                    if fault == "follower_fault":
+                        follower_s["fault_log"]["follower"] += 1
+                    elif fault == "leader_fault":
+                        leader_s["fault_log"]["leader"] += 1
+                    else:
+                        leader_s["fault_log"]["neutral"] += 1
+                        follower_s["fault_log"]["neutral"] += 1
 
                 # Momentum transfer via impulse resolution
                 vel0 = s0["speed"] * np.array([math.cos(s0["heading"]), math.sin(s0["heading"])])

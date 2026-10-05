@@ -220,3 +220,12 @@ class TestContactPenalty:
         from src.env.rewards import contact_penalty
         assert contact_penalty(-0.25) == -0.25
 
+    def test_step_penalty_default_value(self):
+        from src.env.rewards import contact_step_penalty, DEFAULT_CONTACT_STEP_PENALTY
+        assert DEFAULT_CONTACT_STEP_PENALTY == -0.02
+        assert contact_step_penalty() == -0.02
+
+    def test_step_penalty_custom_value(self):
+        from src.env.rewards import contact_step_penalty
+        assert contact_step_penalty(-0.05) == -0.05
+

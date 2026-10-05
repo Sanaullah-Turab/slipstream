@@ -68,8 +68,14 @@ def compute_reward(curr: AgentState, prev: AgentState, track: Track) -> float:
 
 
 DEFAULT_CONTACT_PENALTY = -0.1
+DEFAULT_CONTACT_STEP_PENALTY = -0.02
 
 
 def contact_penalty(penalty: float = DEFAULT_CONTACT_PENALTY) -> float:
     return penalty
+
+
+def contact_step_penalty(penalty: float = DEFAULT_CONTACT_STEP_PENALTY) -> float:
+    return penalty
+
 

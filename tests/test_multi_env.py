@@ -313,8 +313,9 @@ def test_contact_penalty_applied_once_per_event():
 
 
 def test_contact_penalty_configurable():
-    env = MultiRacingEnv(contact_penalty=-0.5)
+    env = MultiRacingEnv(contact_penalty=-0.5, contact_step_penalty=-0.04)
     assert env.contact_penalty == -0.5
+    assert env.contact_step_penalty == -0.04
     env.reset(seed=0)
     pos = env.track.centerline[0].copy()
     for a in AGENTS:
@@ -323,6 +324,38 @@ def test_contact_penalty_configurable():
     _, r1, _, _, _ = env.step(zero_actions(env))
     _, r2, _, _, _ = env.step(zero_actions(env))
     assert pytest.approx(r2[AGENTS[0]] - r1[AGENTS[0]], abs=1e-5) == 0.5
+
+
+def test_contact_step_penalty_applied_every_step():
+    env = MultiRacingEnv(contact_penalty=0.0, contact_step_penalty=-0.05)
+    env.reset(seed=0)
+    pos = env.track.centerline[0].copy()
+    for a in AGENTS:
+        env._state[a]["pos"][:] = pos
+
+    _, r1, _, _, _ = env.step(zero_actions(env))
+    _, r2, _, _, _ = env.step(zero_actions(env))
+    assert pytest.approx(r1[AGENTS[0]], abs=1e-5) == r2[AGENTS[0]]
+
+
+def test_fault_classification_logged_per_event_not_per_step():
+    env = MultiRacingEnv()
+    env.reset(seed=0)
+    pos = env.track.centerline[0].copy()
+    for a in AGENTS:
+        env._state[a]["pos"][:] = pos
+
+    env.step(zero_actions(env))
+    s0_faults_1 = sum(env._state[AGENTS[0]]["fault_log"].values())
+    s1_faults_1 = sum(env._state[AGENTS[1]]["fault_log"].values())
+    total_faults_1 = s0_faults_1 + s1_faults_1
+    assert total_faults_1 > 0
+
+    env.step(zero_actions(env))
+    s0_faults_2 = sum(env._state[AGENTS[0]]["fault_log"].values())
+    s1_faults_2 = sum(env._state[AGENTS[1]]["fault_log"].values())
+    total_faults_2 = s0_faults_2 + s1_faults_2
+    assert total_faults_2 == total_faults_1
 
 
 def test_legacy_collision_env():
