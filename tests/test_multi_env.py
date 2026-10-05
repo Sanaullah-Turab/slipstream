@@ -264,6 +264,25 @@ def test_obb_collision_logged_in_info():
     assert total > 0, "OBB collision at identical positions should be detected"
 
 
+def test_steps_in_contact_and_collision_flag_in_info():
+    env = MultiRacingEnv()
+    env.reset(seed=0)
+    pos = env.track.centerline[0].copy()
+    for a in AGENTS:
+        env._state[a]["pos"][:] = pos
+
+    _, _, _, _, infos1 = env.step(zero_actions(env))
+    assert infos1[AGENTS[0]]["collision"] is True
+    assert infos1[AGENTS[0]]["collision_count"] == 1
+    assert infos1[AGENTS[0]]["steps_in_contact"] == 1
+
+    _, _, _, _, infos2 = env.step(zero_actions(env))
+    assert infos2[AGENTS[0]]["collision"] is True
+    assert infos2[AGENTS[0]]["collision_count"] == 1
+    assert infos2[AGENTS[0]]["steps_in_contact"] == 2
+
+
+
 def test_fault_log_populated_on_collision():
     env = MultiRacingEnv()
     env.reset(seed=0)
