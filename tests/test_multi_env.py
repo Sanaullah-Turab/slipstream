@@ -383,4 +383,29 @@ def test_finish_line_lap_tolerance():
     assert laps <= expected_with_tol
 
 
+def test_all_collision_events_classified_across_role_changes():
+    from src.env.multi_racing_env import aggregate_fault_counts, MultiRacingEnv, AGENTS
+    env = MultiRacingEnv()
+    _, infos = env.reset(seed=0)
+    infos[AGENTS[0]]["collision_count"] = 1
+    infos[AGENTS[0]]["fault_log"] = {"follower": 1, "leader": 0, "neutral": 0}
+    infos[AGENTS[1]]["fault_log"] = {"follower": 0, "leader": 0, "neutral": 0}
+    infos[AGENTS[0]]["cumulative_distance"] = 200.0
+    infos[AGENTS[1]]["cumulative_distance"] = 100.0
+
+    race_pos = {a: infos[a]["cumulative_distance"] + infos[a]["start_offset"] for a in AGENTS}
+    leader = max(AGENTS, key=lambda a: race_pos[a])
+    follower = AGENTS[1] if leader == AGENTS[0] else AGENTS[0]
+
+    old_total = (
+        infos[follower]["fault_log"]["follower"]
+        + infos[leader]["fault_log"]["leader"]
+        + infos[AGENTS[0]]["fault_log"]["neutral"]
+    )
+    assert old_total < infos[AGENTS[0]]["collision_count"]
+
+    counts = aggregate_fault_counts(infos)
+    assert counts["follower"] + counts["leader"] + counts["neutral"] == infos[AGENTS[0]]["collision_count"]
+
+
 
