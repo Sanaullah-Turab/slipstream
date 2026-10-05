@@ -371,3 +371,16 @@ def test_legacy_collision_env():
     assert infos[AGENTS[0]]["collision_count"] == 1
 
 
+def test_finish_line_lap_tolerance():
+    from scripts.eval_multi import FINISH_LINE_TOLERANCE
+    assert FINISH_LINE_TOLERANCE == 7.0
+    track_len = 2434.61
+    laps = 5
+    cum_dist = laps * track_len - 6.49
+    expected_without_tol = int(cum_dist / track_len)
+    expected_with_tol = int((cum_dist + FINISH_LINE_TOLERANCE) / track_len)
+    assert laps > expected_without_tol
+    assert laps <= expected_with_tol
+
+
+
