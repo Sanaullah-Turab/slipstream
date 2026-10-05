@@ -113,7 +113,7 @@ def main() -> None:
         default=None,
         help="Path to single-agent checkpoint (without .zip) for warm start.",
     )
-    parser.add_argument("--freeze-actor-steps", type=int, default=0, help="Number of timesteps to freeze the actor for.")
+    parser.add_argument("--freeze-actor-steps", type=int, default=None, help="Number of timesteps to freeze the actor for.")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -176,8 +176,9 @@ def main() -> None:
             n_episodes=train_cfg["eval_episodes"],
         ),
     ]
-    if args.freeze_actor_steps > 0:
-        callbacks.append(FreezeActorCallback(args.freeze_actor_steps))
+    freeze_steps = args.freeze_actor_steps if args.freeze_actor_steps is not None else train_cfg.get("freeze_actor_steps", 0)
+    if freeze_steps > 0:
+        callbacks.append(FreezeActorCallback(freeze_steps))
 
     try:
         model.learn(total_timesteps=total_timesteps, callback=callbacks)
