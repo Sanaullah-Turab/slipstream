@@ -34,7 +34,7 @@ def test_obs_shape():
     env = MultiRacingEnv()
     obs, _ = env.reset(seed=0)
     for a in AGENTS:
-        assert obs[a].shape == (15,)
+        assert obs[a].shape == (19,)
 
 
 def test_step_all_keys():
@@ -47,7 +47,7 @@ def test_step_all_keys():
 def test_info_keys():
     env = make_env()
     _, _, _, _, infos = env.step(zero_actions(env))
-    expected = {"laps", "progress", "speed", "respawns", "collision_count", "cumulative_distance"}
+    expected = {"laps", "progress", "speed", "respawns", "collision_count", "cumulative_distance", "fault_log"}
     assert expected.issubset(set(infos[AGENTS[0]].keys()))
 
 
@@ -153,11 +153,11 @@ def test_truncation():
 def test_vec_env_shape():
     env = TwoCarVecEnv()
     obs = np.asarray(env.reset())
-    assert obs.shape == (2, 15)
+    assert obs.shape == (2, 19)
     actions = np.stack([env.action_space.sample() for _ in range(2)])
     obs_step, rewards, dones, infos = env.step(actions)
     obs_step = np.asarray(obs_step)
-    assert obs_step.shape == (2, 15)
+    assert obs_step.shape == (2, 19)
     assert rewards.shape == (2,)
     assert dones.shape == (2,)
     env.close()
@@ -173,7 +173,7 @@ def test_vec_env_truncation_terminal_obs():
     for info in infos:
         assert "terminal_observation" in info
         assert info["TimeLimit.truncated"] is True
-        assert info["terminal_observation"].shape == (15,)
+        assert info["terminal_observation"].shape == (19,)
     vec.close()
 
 
@@ -225,3 +225,54 @@ def test_parallel_api():
     from pettingzoo.test import parallel_api_test
     env = MultiRacingEnv()
     parallel_api_test(env, num_cycles=10)
+
+
+def test_warm_start_19dim_produces_same_actions_as_15dim():
+    """Zero-padded 19-dim warm start: first layer must accept (19,) and last 4 input weights zero."""
+    import torch
+    from stable_baselines3 import PPO
+    from src.env.vec_multi import TwoCarVecEnv
+
+    env_19 = TwoCarVecEnv()
+    model_19 = PPO("MlpPolicy", env_19, seed=0)
+
+    first_layer = getattr(model_19.policy.mlp_extractor.policy_net, "0")
+    assert first_layer.weight.shape[1] == 19
+
+    with torch.no_grad():
+        w = first_layer.weight.data.clone()
+        w[:, 15:] = 0.0
+        first_layer.weight.data = w
+
+    # Build 19-dim obs with last 4 zeros, ensure output is stable (no NaN)
+    obs_19 = np.zeros((4, 19), dtype=np.float32)
+    obs_19[:, :15] = np.random.randn(4, 15).astype(np.float32)
+    acts, _ = model_19.predict(obs_19, deterministic=True)
+    assert not np.any(np.isnan(acts)), "NaN in actions from zero-padded 19-dim obs"
+    assert acts.shape == (4, 2)
+
+
+def test_obb_collision_logged_in_info():
+    env = MultiRacingEnv()
+    env.reset(seed=0)
+    pos = env.track.centerline[0].copy()
+    for a in AGENTS:
+        env._state[a]["pos"][:] = pos
+
+    _, _, _, _, infos = env.step(zero_actions(env))
+    total = sum(infos[a]["collision_count"] for a in AGENTS)
+    assert total > 0, "OBB collision at identical positions should be detected"
+
+
+def test_fault_log_populated_on_collision():
+    env = MultiRacingEnv()
+    env.reset(seed=0)
+    pos = env.track.centerline[0].copy()
+    for a in AGENTS:
+        env._state[a]["pos"][:] = pos
+
+    env.step(zero_actions(env))
+    total_faults = sum(
+        sum(env._state[a]["fault_log"].values()) for a in AGENTS
+    )
+    assert total_faults > 0, "Fault log must be populated after a collision"
