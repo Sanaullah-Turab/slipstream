@@ -324,3 +324,17 @@ def test_contact_penalty_configurable():
     _, r2, _, _, _ = env.step(zero_actions(env))
     assert pytest.approx(r2[AGENTS[0]] - r1[AGENTS[0]], abs=1e-5) == 0.5
 
+
+def test_legacy_collision_env():
+    env = MultiRacingEnv(legacy_collision=True)
+    obs, _ = env.reset(seed=0)
+    for a in AGENTS:
+        assert obs[a].shape == (15,)
+    pos = env.track.centerline[0].copy()
+    for a in AGENTS:
+        env._state[a]["pos"][:] = pos
+    _, _, _, _, infos = env.step(zero_actions(env))
+    assert infos[AGENTS[0]]["collision"] is True
+    assert infos[AGENTS[0]]["collision_count"] == 1
+
+
