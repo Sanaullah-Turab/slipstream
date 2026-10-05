@@ -61,11 +61,14 @@ Expand the observation space from 15 dims to 19 dims, zero-padding the new input
   1. **Contact Events / Episode:** At most 50% of the measured OBB baseline:
      - Deterministic: <= 3.22 contact events/ep
      - Stochastic: <= 3.40 contact events/ep
-  2. **Collision-Induced Crash Rate:** <= 0.10 crashes per 1,000 agent-steps in both modes.
-  3. **Solo Crash Rate:** <= 0.10 crashes per 1,000 agent-steps in both modes.
-  4. **Pace Retention:** At least 95% of measured baseline pace in both modes:
-     - Deterministic pair pace: >= 2.5819 laps/1k steps (Leader >= 2.5841, Follower >= 2.5796)
-     - Stochastic pair pace: >= 2.5624 laps/1k steps (Leader >= 2.5674, Follower >= 2.5575)
+  2. **Steps in Contact / Episode:** At most 50% of the measured OBB baseline:
+     - Deterministic: <= 158 steps in contact/ep
+     - Stochastic: <= 153 steps in contact/ep
+  3. **Collision-Induced Crash Rate:** <= 0.05 crashes per 1,000 agent-steps in both modes.
+  4. **Solo Crash Rate:** <= 0.05 crashes per 1,000 agent-steps in both modes.
+  5. **Pace Retention:** At least 95% of measured baseline pace, per agent and pair average, in both modes:
+     - Deterministic: Leader >= 2.5841, Follower >= 2.5796, Pair >= 2.5819 laps/1k steps
+     - Stochastic: Leader >= 2.5674, Follower >= 2.5575, Pair >= 2.5624 laps/1k steps
 
 ### Step 4.2: The Draft & Position Incentive
 - **Active:** Step 4.1 + Slipstream physics + Continuous Positional Rewards.
