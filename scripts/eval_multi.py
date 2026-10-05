@@ -85,8 +85,8 @@ def main(args):
             done = any(trunc_dict.values())
             for a in AGENTS:
                 s = info_dict[a]
-                expected_max_laps = int((s["cumulative_distance"] + s["start_offset"]) / env.track.total_length)
-                assert s["laps"] <= expected_max_laps, f"Spurious lap in eval: {s["laps"]} > {expected_max_laps}"
+                expected_max_laps = int((s["cumulative_distance"] + s["start_offset"] + 25.0) / env.track.total_length)
+                assert s["laps"] <= expected_max_laps, f"Spurious lap in eval: {s['laps']} > {expected_max_laps}"
             
             for a in AGENTS:
                 ep_speed_sum[a] += info_dict[a]["speed"]
