@@ -27,7 +27,7 @@ def _git_sha() -> str:
 
 
 class CheckpointCallback(BaseCallback):
-    def __init__(self, save_freq: int, save_dir: str, keep_last: int = 3):
+    def __init__(self, save_freq: int, save_dir: str, keep_last: int | None = None):
         super().__init__()
         self.save_freq = save_freq
         self.save_dir = Path(save_dir)
@@ -48,7 +48,7 @@ class CheckpointCallback(BaseCallback):
             (self.save_dir / f"meta_{self.num_timesteps}.json").write_text(json.dumps(meta))
 
             self._saved.append((path, self.num_timesteps))
-            if len(self._saved) > self.keep_last:
+            if self.keep_last is not None and len(self._saved) > self.keep_last:
                 old_path, old_ts = self._saved.pop(0)
                 old_path.with_suffix(".zip").unlink(missing_ok=True)
                 (self.save_dir / f"meta_{old_ts}.json").unlink(missing_ok=True)

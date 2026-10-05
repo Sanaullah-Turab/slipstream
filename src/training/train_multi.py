@@ -170,6 +170,7 @@ def main() -> None:
         CheckpointCallback(
             save_freq=train_cfg["checkpoint_freq"],
             save_dir=str(ckpt_dir),
+            keep_last=train_cfg.get("keep_last", None),
         ),
         MultiEvalCallback(
             eval_freq=train_cfg["eval_freq"],
