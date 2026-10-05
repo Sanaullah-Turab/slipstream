@@ -10,24 +10,29 @@ from gymnasium import spaces
 from .track import Track
 from .car import CarState, DEFAULT_PARAMS, DT, MAX_SPEED, CAR_HALF_WIDTH, step_physics
 from .racing_env import MAX_STEPS, MAX_HEADING_RATE, MAX_RAY_DIST
-from .rewards import compute_reward, AgentState
+from .rewards import compute_reward, AgentState, DEFAULT_CONTACT_PENALTY
 from .collision import obb_overlap, resolve_collision, classify_contact
 
 AGENTS = ["agent_0", "agent_1"]
 SPAWN_OFFSET_IDX = 10
 MAX_OPP_DIST = 300.0
 CAR_HALF_LEN = 20.0
-CONTACT_PENALTY = -0.1
 LATERAL_HISTORY_LEN = 20
 
 class MultiRacingEnv(ParallelEnv):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30, "name": "multi_racing_v1"}
 
-    def __init__(self, render_mode: Optional[str] = None, enable_draft: bool = False) -> None:
+    def __init__(
+        self,
+        render_mode: Optional[str] = None,
+        enable_draft: bool = False,
+        contact_penalty: float = DEFAULT_CONTACT_PENALTY,
+    ) -> None:
         super().__init__()
         self.track = Track()
         self.render_mode = render_mode
         self.enable_draft = enable_draft
+        self.contact_penalty = contact_penalty
         self.possible_agents = AGENTS[:]
 
         self.observation_spaces = {a: spaces.Box(low=-2.0, high=2.0, shape=(19,), dtype=np.float32) for a in AGENTS}
@@ -279,9 +284,8 @@ class MultiRacingEnv(ParallelEnv):
                     leader_s["fault_log"]["neutral"] += 1
                     follower_s["fault_log"]["neutral"] += 1
 
-                # Apply symmetric contact penalty to both agents (penalties off by design in 4.1)
-                rewards[AGENTS[0]] += CONTACT_PENALTY
-                rewards[AGENTS[1]] += CONTACT_PENALTY
+                rewards[AGENTS[0]] += self.contact_penalty
+                rewards[AGENTS[1]] += self.contact_penalty
 
             # Momentum transfer via impulse resolution
             vel0 = s0["speed"] * np.array([math.cos(s0["heading"]), math.sin(s0["heading"])])

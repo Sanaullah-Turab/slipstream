@@ -65,3 +65,11 @@ def compute_reward(curr: AgentState, prev: AgentState, track: Track) -> float:
         + _lateral_penalty(curr, track)
         + _lap_bonus(curr, prev)
     )
+
+
+DEFAULT_CONTACT_PENALTY = -0.1
+
+
+def contact_penalty(penalty: float = DEFAULT_CONTACT_PENALTY) -> float:
+    return penalty
+
