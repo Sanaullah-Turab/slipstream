@@ -208,3 +208,15 @@ class TestComputeReward:
             + _lap_bonus(curr, prev)
         )
         assert compute_reward(curr, prev, track) == pytest.approx(expected, rel=1e-6)
+
+
+class TestContactPenalty:
+    def test_default_value(self):
+        from src.env.rewards import contact_penalty, DEFAULT_CONTACT_PENALTY
+        assert DEFAULT_CONTACT_PENALTY == -0.1
+        assert contact_penalty() == -0.1
+
+    def test_custom_value(self):
+        from src.env.rewards import contact_penalty
+        assert contact_penalty(-0.25) == -0.25
+

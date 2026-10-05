@@ -276,3 +276,32 @@ def test_fault_log_populated_on_collision():
         sum(env._state[a]["fault_log"].values()) for a in AGENTS
     )
     assert total_faults > 0, "Fault log must be populated after a collision"
+
+
+def test_contact_penalty_applied_once_per_event():
+    env = MultiRacingEnv(contact_penalty=-0.1)
+    env.reset(seed=0)
+    pos = env.track.centerline[0].copy()
+    for a in AGENTS:
+        env._state[a]["pos"][:] = pos
+
+    _, r1, _, _, _ = env.step(zero_actions(env))
+    assert env._state[AGENTS[0]]["prev_colliding"] is True
+
+    _, r2, _, _, _ = env.step(zero_actions(env))
+    assert r1[AGENTS[0]] < r2[AGENTS[0]]
+    assert pytest.approx(r2[AGENTS[0]] - r1[AGENTS[0]], abs=1e-5) == 0.1
+
+
+def test_contact_penalty_configurable():
+    env = MultiRacingEnv(contact_penalty=-0.5)
+    assert env.contact_penalty == -0.5
+    env.reset(seed=0)
+    pos = env.track.centerline[0].copy()
+    for a in AGENTS:
+        env._state[a]["pos"][:] = pos
+
+    _, r1, _, _, _ = env.step(zero_actions(env))
+    _, r2, _, _, _ = env.step(zero_actions(env))
+    assert pytest.approx(r2[AGENTS[0]] - r1[AGENTS[0]], abs=1e-5) == 0.5
+
