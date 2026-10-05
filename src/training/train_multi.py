@@ -65,25 +65,23 @@ def _seed_everything(seed: int) -> None:
 
 
 def _warm_start(model: PPO, checkpoint: str) -> None:
-    single = PPO.load(checkpoint)
+    source = PPO.load(checkpoint)
 
-    # Validate that the single-agent model expects exactly 11 dims
-    first_layer = getattr(single.policy.mlp_extractor.policy_net, "0")
-    single_input_dim = first_layer.weight.shape[1]
-    if single_input_dim != 11:
+    first_layer = getattr(source.policy.mlp_extractor.policy_net, "0")
+    source_input_dim = first_layer.weight.shape[1]
+    if source_input_dim not in (11, 15):
         raise ValueError(
-            f"Warm-start model has {single_input_dim} obs dims; expected 11 (legacy single-agent)."
+            f"Warm-start model has {source_input_dim} obs dims; expected 11 or 15."
         )
 
-    def _patch_net(multi_net, single_net):
+    def _patch_net(multi_net, source_net):
         with torch.no_grad():
-            for i, (m_layer, s_layer) in enumerate(zip(multi_net, single_net)):
+            for i, (m_layer, s_layer) in enumerate(zip(multi_net, source_net)):
                 if hasattr(m_layer, "weight"):
                     if i == 0:
-                        # Pad the first layer
-                        w_single = s_layer.weight.data
-                        m_layer.weight.data[:, :w_single.shape[1]] = w_single
-                        m_layer.weight.data[:, w_single.shape[1]:] = 0.0
+                        w_source = s_layer.weight.data
+                        m_layer.weight.data[:, :w_source.shape[1]] = w_source
+                        m_layer.weight.data[:, w_source.shape[1]:] = 0.0
                     else:
                         m_layer.weight.data.copy_(s_layer.weight.data)
                 if hasattr(m_layer, "bias") and m_layer.bias is not None:
@@ -91,19 +89,17 @@ def _warm_start(model: PPO, checkpoint: str) -> None:
 
     _patch_net(
         model.policy.mlp_extractor.policy_net,
-        single.policy.mlp_extractor.policy_net,
+        source.policy.mlp_extractor.policy_net,
     )
     _patch_net(
         model.policy.mlp_extractor.value_net,
-        single.policy.mlp_extractor.value_net,
+        source.policy.mlp_extractor.value_net,
     )
 
-    # Copy action_net and log_std (they have exact same dimensions)
-    model.policy.action_net.load_state_dict(single.policy.action_net.state_dict())
-    model.policy.log_std.data.copy_(single.policy.log_std.data)
-    
-    # Copy value_net (value head)
-    model.policy.value_net.load_state_dict(single.policy.value_net.state_dict())
+    model.policy.action_net.load_state_dict(source.policy.action_net.state_dict())
+    model.policy.log_std.data.copy_(source.policy.log_std.data)
+    model.policy.value_net.load_state_dict(source.policy.value_net.state_dict())
+
 
 
 def main() -> None:
