@@ -27,15 +27,18 @@ class MultiRacingEnv(ParallelEnv):
         render_mode: Optional[str] = None,
         enable_draft: bool = False,
         contact_penalty: float = DEFAULT_CONTACT_PENALTY,
+        legacy_collision: bool = False,
     ) -> None:
         super().__init__()
         self.track = Track()
         self.render_mode = render_mode
         self.enable_draft = enable_draft
         self.contact_penalty = contact_penalty
+        self.legacy_collision = legacy_collision
         self.possible_agents = AGENTS[:]
 
-        self.observation_spaces = {a: spaces.Box(low=-2.0, high=2.0, shape=(19,), dtype=np.float32) for a in AGENTS}
+        obs_dim = 15 if legacy_collision else 19
+        self.observation_spaces = {a: spaces.Box(low=-2.0, high=2.0, shape=(obs_dim,), dtype=np.float32) for a in AGENTS}
         self.action_spaces = {
             a: spaces.Box(
                 low=np.array([-1.0, -1.0], dtype=np.float32),
@@ -137,23 +140,28 @@ class MultiRacingEnv(ParallelEnv):
         # Draft flag continuous [0,1] (dim 18) - stub for 4.1, activated in 4.2
         draft_flag = 0.0
 
+        base_obs = [
+            s["speed"] / MAX_SPEED,
+            np.sin(heading_err),
+            np.cos(heading_err),
+            lateral_norm,
+            s["progress"],
+            float(np.clip(s["heading_rate"] / MAX_HEADING_RATE, -1.0, 1.0)),
+            *np.clip(rays, 0.0, 1.0),
+            opp_dist,
+            opp_progress_gap,
+            opp_rel_speed,
+            opp_lateral_gap,
+        ]
+        if self.legacy_collision:
+            return np.array(base_obs, dtype=np.float32)
+
         return np.array(
-            [
-                s["speed"] / MAX_SPEED,
-                np.sin(heading_err),
-                np.cos(heading_err),
-                lateral_norm,
-                s["progress"],
-                float(np.clip(s["heading_rate"] / MAX_HEADING_RATE, -1.0, 1.0)),
-                *np.clip(rays, 0.0, 1.0),
-                opp_dist,
-                opp_progress_gap,
-                opp_rel_speed,
-                opp_lateral_gap,
+            base_obs + [
                 opp_vel_ego_lat,
                 opp_rel_heading,
                 draft_flag,
-                draft_flag,  # is_being_drafted stub
+                draft_flag,
             ],
             dtype=np.float32,
         )
@@ -249,19 +257,31 @@ class MultiRacingEnv(ParallelEnv):
         self._step_count += 1
 
         # --- OBB collision detection and response ---
-        s0, s1 = self._state[AGENTS[0]], self._state[AGENTS[1]]
-        overlapping, normal, _ = obb_overlap(
-            s0["pos"], s0["heading"],
-            s1["pos"], s1["heading"],
-            CAR_HALF_LEN, CAR_HALF_WIDTH,
-        )
+        if self.legacy_collision:
+            s0, s1 = self._state[AGENTS[0]], self._state[AGENTS[1]]
+            colliding = float(np.linalg.norm(s0["pos"] - s1["pos"])) < 2.0 * CAR_HALF_WIDTH
+            if colliding:
+                s0["steps_in_contact"] += 1
+                s1["steps_in_contact"] += 1
+                if not s0["prev_colliding"]:
+                    s0["collision_count"] += 1
+                    s1["collision_count"] += 1
+            for s in (s0, s1):
+                s["prev_colliding"] = colliding
+        else:
+            s0, s1 = self._state[AGENTS[0]], self._state[AGENTS[1]]
+            overlapping, normal, _ = obb_overlap(
+                s0["pos"], s0["heading"],
+                s1["pos"], s1["heading"],
+                CAR_HALF_LEN, CAR_HALF_WIDTH,
+            )
 
-        if overlapping:
-            s0["steps_in_contact"] += 1
-            s1["steps_in_contact"] += 1
-            if not s0["prev_colliding"]:
-                s0["collision_count"] += 1
-                s1["collision_count"] += 1
+            if overlapping:
+                s0["steps_in_contact"] += 1
+                s1["steps_in_contact"] += 1
+                if not s0["prev_colliding"]:
+                    s0["collision_count"] += 1
+                    s1["collision_count"] += 1
 
                 # Determine leader by cumulative distance
                 if s0["cumulative_distance"] >= s1["cumulative_distance"]:
@@ -298,8 +318,8 @@ class MultiRacingEnv(ParallelEnv):
             s0["speed"] = float(np.clip(np.linalg.norm(vel0_new), 0.0, MAX_SPEED))
             s1["speed"] = float(np.clip(np.linalg.norm(vel1_new), 0.0, MAX_SPEED))
 
-        for s in (s0, s1):
-            s["prev_colliding"] = overlapping
+            for s in (s0, s1):
+                s["prev_colliding"] = overlapping
 
         truncated = self._step_count >= MAX_STEPS
 
