@@ -45,3 +45,22 @@ def test_warm_start_identity():
 
     np.testing.assert_allclose(actions_multi, actions_single, atol=1e-6)
     np.testing.assert_allclose(values_multi, values_single, atol=1e-6)
+
+
+def test_warm_start_phase3_15dim_to_19dim_equivalence():
+    checkpoint_path = "checkpoints/multi-A/slipstream-multi-A-84a9ee1/final.zip"
+    phase3_model = PPO.load(checkpoint_path, device="cpu")
+
+    env19 = TwoCarVecEnv()
+    model19 = PPO("MlpPolicy", env19, device="cpu")
+    _warm_start(model19, checkpoint_path)
+
+    np.random.seed(42)
+    obs_15 = np.random.randn(100, 15).astype(np.float32)
+    obs_19 = np.concatenate([obs_15, np.random.randn(100, 4).astype(np.float32)], axis=1)
+
+    act_15, _ = phase3_model.predict(obs_15, deterministic=True)
+    act_19, _ = model19.predict(obs_19, deterministic=True)
+
+    np.testing.assert_allclose(act_19, act_15, atol=1e-6)
+
