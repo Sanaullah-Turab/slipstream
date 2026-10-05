@@ -138,6 +138,37 @@ def test_resolve_low_restitution_dissipates_energy():
     assert ke_after < ke_before
 
 
+@pytest.mark.parametrize("restitution", [0.2, 0.25, 0.3, 0.35, 0.4])
+def test_resolve_restitution_range_energy_dissipation(restitution):
+    vel_a = np.array([-15.0, 2.0])
+    vel_b = np.array([12.0, -1.0])
+    normal = np.array([1.0, 0.0])
+    va2, vb2 = resolve_collision(np.zeros(2), vel_a, np.zeros(2), vel_b, normal, restitution=restitution)
+    ke_before = np.dot(vel_a, vel_a) + np.dot(vel_b, vel_b)
+    ke_after = np.dot(va2, va2) + np.dot(vb2, vb2)
+    assert ke_after < ke_before
+    rel_approach = abs(float(np.dot(vel_a - vel_b, normal)))
+    rel_separate = abs(float(np.dot(va2 - vb2, normal)))
+    assert rel_separate == pytest.approx(restitution * rel_approach, rel=1e-5)
+
+
+def test_no_tunneling_closing_head_on_max_speed():
+    from src.env.car import MAX_SPEED, DT
+    step_dist = MAX_SPEED * DT
+    for gap in np.linspace(0.01, step_dist * 2.0 - 0.01, 50):
+        pos_a_0 = np.array([0.0, 0.0])
+        pos_b_0 = np.array([2.0 * HALF_LEN + gap, 0.0])
+        init_overlap, _, _ = obb_overlap(pos_a_0, 0.0, pos_b_0, 0.0, HALF_LEN, HALF_W)
+        assert not init_overlap
+
+        pos_a_1 = pos_a_0 + np.array([step_dist, 0.0])
+        pos_b_1 = pos_b_0 - np.array([step_dist, 0.0])
+        next_overlap, _, pen = obb_overlap(pos_a_1, 0.0, pos_b_1, 0.0, HALF_LEN, HALF_W)
+        assert next_overlap
+        assert pen > 0.0
+
+
+
 # ---------------------------------------------------------------------------
 # Fault classification
 # ---------------------------------------------------------------------------
@@ -219,4 +250,4 @@ def test_classify_boundary_angle_is_neutral():
         lateral_history_leader=history,
         follower_lateral=0.0,
     )
-    assert result in ("neutral", "leader_fault")
+    assert result == "neutral"
