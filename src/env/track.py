@@ -3,7 +3,7 @@ from typing import NamedTuple
 import numpy as np
 from scipy.interpolate import splprep, splev  # type: ignore
 
-TRACK_WIDTH = 65.0
+TRACK_WIDTH = 70.0
 N_SAMPLES = 800
 RAY_ANGLES = np.deg2rad([-90.0, -45.0, 0.0, 45.0, 90.0])
 

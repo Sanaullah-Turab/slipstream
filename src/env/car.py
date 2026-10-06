@@ -4,7 +4,7 @@ import math
 from typing import NamedTuple
 
 DT = 0.05
-CAR_HALF_WIDTH = 9.0
+CAR_HALF_WIDTH = 5.5
 
 
 class CarState(NamedTuple):
