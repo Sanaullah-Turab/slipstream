@@ -421,16 +421,27 @@ class MultiRacingEnv(ParallelEnv):
         outer = [(int(x), int(y)) for x, y in self.track.outer]
         inner = [(int(x), int(y)) for x, y in self.track.inner]
 
-        for i in range(len(outer) - 1):
+        for i in range(len(self.track.outer) - 1):
             c = (215, 45, 45) if (i // 8) % 2 == 0 else (240, 242, 246)
-            pygame.draw.line(surf, c, outer[i], outer[i + 1], 4)
-
-        for i in range(len(inner) - 1):
-            c = (215, 45, 45) if (i // 8) % 2 == 0 else (240, 242, 246)
-            pygame.draw.line(surf, c, inner[i], inner[i + 1], 4)
+            p0 = self.track.outer[i]
+            p1 = self.track.outer[i + 1]
+            n0 = self.track.normals[i]
+            n1 = self.track.normals[i + 1]
+            poly = [p0, p1, p1 - n1 * 5.0, p0 - n0 * 5.0]
+            pygame.draw.polygon(surf, c, [(int(p[0]), int(p[1])) for p in poly])
 
         pygame.draw.polygon(surf, (34, 37, 43), outer)
         pygame.draw.polygon(surf, (18, 26, 20), inner)
+
+        for i in range(len(self.track.inner) - 1):
+            c = (215, 45, 45) if (i // 8) % 2 == 0 else (240, 242, 246)
+            p0 = self.track.inner[i]
+            p1 = self.track.inner[i + 1]
+            n0 = self.track.normals[i]
+            n1 = self.track.normals[i + 1]
+            poly = [p0, p1, p1 + n1 * 5.0, p0 + n0 * 5.0]
+            pygame.draw.polygon(surf, c, [(int(p[0]), int(p[1])) for p in poly])
+
         pygame.draw.lines(surf, (235, 238, 244), True, outer, 2)
         pygame.draw.lines(surf, (235, 238, 244), True, inner, 2)
 
@@ -477,12 +488,12 @@ class MultiRacingEnv(ParallelEnv):
             left = np.array([-fwd[1], fwd[0]])
 
             for ax in (10.0, -10.0):
-                for lat in (8.6, -8.6):
+                for lat in (6.8, -6.8):
                     t_center = pos + fwd * ax + left * lat
-                    t_fl = t_center + fwd * 4.0 + left * 1.6
-                    t_fr = t_center + fwd * 4.0 - left * 1.6
-                    t_rr = t_center - fwd * 4.0 - left * 1.6
-                    t_rl = t_center - fwd * 4.0 + left * 1.6
+                    t_fl = t_center + fwd * 3.5 + left * 1.8
+                    t_fr = t_center + fwd * 3.5 - left * 1.8
+                    t_rr = t_center - fwd * 3.5 - left * 1.8
+                    t_rl = t_center - fwd * 3.5 + left * 1.8
                     pygame.draw.polygon(
                         surf, (16, 16, 18),
                         [(int(p[0]), int(p[1])) for p in (t_fl, t_fr, t_rr, t_rl)],
