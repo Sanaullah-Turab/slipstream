@@ -105,6 +105,7 @@ class MultiRacingEnv(ParallelEnv):
                 "arc_length": ts.arc_length,
                 "laps": -1 if ts.progress > 0.5 else 0,
                 "cumulative_distance": 0.0,
+                "respawn": False,
                 "respawns": 0,
                 "prev_colliding": False,
                 "collision_count": 0,
@@ -186,6 +187,7 @@ class MultiRacingEnv(ParallelEnv):
             "laps": s["laps"],
             "progress": s["progress"],
             "speed": s["speed"],
+            "respawn": s["respawn"],
             "respawns": s["respawns"],
             "collision": s["prev_colliding"],
             "collision_count": s["collision_count"],
@@ -204,6 +206,7 @@ class MultiRacingEnv(ParallelEnv):
 
         for agent in self.agents:
             s = self._state[agent]
+            s["respawn"] = False
             action = actions[agent]
             steer = float(np.clip(action[0], -1.0, 1.0))
             throttle = float(np.clip(action[1], -1.0, 1.0))
@@ -263,6 +266,7 @@ class MultiRacingEnv(ParallelEnv):
 
             if not ts.on_track:
                 reward = -5.0
+                s["respawn"] = True
                 s["respawns"] += 1
                 self._respawn(agent)
 
