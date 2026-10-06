@@ -54,21 +54,22 @@ Expand the observation space from 15 dims to 19 dims, zero-padding the new input
 ### Step 4.1: The Physical Baseline
 - **Active:** OBB Collisions, momentum transfer, small symmetric contact penalty (-0.1 applied once per contact event), 19-dim observations (drafting flags zeroed), enable_draft=False.
 - **Warm-start:** Load Phase 3 final (`checkpoints/multi-A/slipstream-multi-A-84a9ee1/final.zip`).
-- **Measured OBB Baseline (20 episodes):**
-  - Deterministic: 6.45 contact events/ep, 316.60 steps in contact/ep, 0.0125 col-crashes/1k, 0.0125 solo-crashes/1k, pace L=2.7201 / F=2.7154 / pair=2.7178.
-  - Stochastic: 6.80 contact events/ep, 306.45 steps in contact/ep, 0.0625 col-crashes/1k, 0.0125 solo-crashes/1k, pace L=2.7025 / F=2.6921 / pair=2.6973.
+- **Measured OBB Baseline (50 episodes, clean spawn idx=15):**
+  - Deterministic: 6.24 contact events/ep, 173.04 steps in contact/ep, 0.0150 col-crashes/1k, 0.0000 solo-crashes/1k, pace L=2.7201 / F=2.7184 / pair=2.7193 laps/1k steps.
+  - Stochastic: 7.20 contact events/ep, 135.90 steps in contact/ep, 0.0800 col-crashes/1k, 0.0450 solo-crashes/1k, pace L=2.6991 / F=2.6921 / pair=2.6956 laps/1k steps.
+  - Note: Measured in the fixed env (spawn_offset_idx=15, respawn fix), seeds 1000-1049, 50 episodes. The old baseline was spawn-contaminated.
 - **Gate to 4.2 (Empirical Criteria):**
   1. **Contact Events / Episode:** At most 50% of the measured OBB baseline:
-     - Deterministic: <= 3.22 contact events/ep
-     - Stochastic: <= 3.40 contact events/ep
+     - Deterministic: <= 3.12 contact events/ep
+     - Stochastic: <= 3.60 contact events/ep
   2. **Steps in Contact / Episode:** At most 50% of the measured OBB baseline:
-     - Deterministic: <= 158 steps in contact/ep
-     - Stochastic: <= 153 steps in contact/ep
+     - Deterministic: <= 86.52 steps in contact/ep
+     - Stochastic: <= 67.95 steps in contact/ep
   3. **Collision-Induced Crash Rate:** <= 0.05 crashes per 1,000 agent-steps in both modes.
   4. **Solo Crash Rate:** <= 0.05 crashes per 1,000 agent-steps in both modes.
   5. **Pace Retention:** At least 95% of measured baseline pace, per agent and pair average, in both modes:
-     - Deterministic: Leader >= 2.5841, Follower >= 2.5796, Pair >= 2.5819 laps/1k steps
-     - Stochastic: Leader >= 2.5674, Follower >= 2.5575, Pair >= 2.5624 laps/1k steps
+     - Deterministic: Leader >= 2.5841, Follower >= 2.5825, Pair >= 2.5833 laps/1k steps
+     - Stochastic: Leader >= 2.5641, Follower >= 2.5575, Pair >= 2.5608 laps/1k steps
 
 ### Step 4.2: The Draft & Position Incentive
 - **Active:** Step 4.1 + Slipstream physics + Continuous Positional Rewards.
