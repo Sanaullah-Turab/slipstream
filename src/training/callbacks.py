@@ -290,3 +290,73 @@ class TrainCrashCallback(BaseCallback):
             self.logger.record("train/respawns_per_1000_steps", rate)
 
 
+class TrainingEpisodeCallback(BaseCallback):
+    def __init__(self, log_path: Path | str | None = None):
+        super().__init__()
+        self.log_path = Path(log_path) if log_path else None
+        self.episode_records: list[dict] = []
+        self._cur_step = 0
+        self._last_respawn_step = -9999
+        self._in_contact = False
+        self._events_near_respawn = 0
+
+    def _on_step(self) -> bool:
+        self._cur_step += 1
+        infos = self.locals.get("infos", [])
+        dones = self.locals.get("dones", [])
+
+        if len(infos) >= 2:
+            info0 = infos[0]
+            info1 = infos[1]
+
+            if info0.get("respawn", False) or info1.get("respawn", False):
+                self._last_respawn_step = self._cur_step
+
+            contact = info0.get("collision", False)
+            if contact and not self._in_contact:
+                if (self._cur_step - self._last_respawn_step) <= 30:
+                    self._events_near_respawn += 1
+            self._in_contact = contact
+
+            is_done = dones.any() if hasattr(dones, "any") else any(dones)
+            if is_done:
+                col_count = info0.get("collision_count", 0)
+                steps_contact = info0.get("steps_in_contact", 0)
+                step_pen = steps_contact * (-0.02)
+                event_pen = col_count * (-0.1)
+                respawns = info0.get("respawns", 0) + info1.get("respawns", 0)
+
+                rec = {
+                    "episode": len(self.episode_records) + 1,
+                    "global_step": self.num_timesteps,
+                    "collision_count": col_count,
+                    "steps_in_contact": steps_contact,
+                    "step_contact_penalty": step_pen,
+                    "event_contact_penalty": event_pen,
+                    "total_contact_penalty": step_pen + event_pen,
+                    "respawns": respawns,
+                    "events_near_respawn": self._events_near_respawn,
+                }
+                self.episode_records.append(rec)
+
+                if wandb.run is not None:
+                    wandb.log({
+                        "train_ep/step_contact_penalty": step_pen,
+                        "train_ep/event_contact_penalty": event_pen,
+                        "train_ep/total_contact_penalty": step_pen + event_pen,
+                        "train_ep/respawns": respawns,
+                        "train_ep/contact_events_near_respawn": self._events_near_respawn,
+                    })
+
+                self._events_near_respawn = 0
+                self._in_contact = False
+
+        return True
+
+    def _on_training_end(self) -> None:
+        if self.log_path and self.episode_records:
+            self.log_path.parent.mkdir(parents=True, exist_ok=True)
+            self.log_path.write_text(json.dumps(self.episode_records, indent=2))
+
+
+
