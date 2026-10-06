@@ -37,3 +37,12 @@ def test_render_chassis_matches_physical_obb_constants():
     total_width = 2.0 * CAR_HALF_WIDTH
     assert total_len == 40.0
     assert total_width == 18.0
+
+
+def test_watch_multi_agent_parser():
+    from scripts.watch_multi_agent import build_parser
+    parser = build_parser()
+    args = parser.parse_args([])
+    assert "slipstream-p4-1b-7b1372f/final" in args.checkpoint
+    assert args.stochastic is False
+
