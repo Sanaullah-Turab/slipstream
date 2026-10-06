@@ -1,0 +1,28 @@
+env:
+  render_mode: null
+
+ppo:
+  policy: MlpPolicy
+  n_steps: 2048
+  batch_size: 64
+  n_epochs: 10
+  learning_rate: 1.0e-4
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.01
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  device: cpu
+
+train:
+  total_timesteps: 500_000
+  seed: 42
+  checkpoint_freq: 100_000
+  eval_freq: 25_000
+  eval_episodes: 5
+  freeze_actor_steps: 50_000
+  checkpoint_dir: checkpoints/phase4
+  run_name: slipstream-p4-1b
+  group: phase4
+  tags: [phase4, 4.1b-fixed-env, obb-collision]

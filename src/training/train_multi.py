@@ -40,7 +40,7 @@ class FreezeActorCallback(BaseCallback):
 from src.env.car import CAR_HALF_WIDTH, DT, MAX_SPEED
 from src.env.rewards import WALL_ZONE
 from src.env.vec_multi import TwoCarVecEnv
-from src.training.callbacks import CheckpointCallback, MultiEvalCallback
+from src.training.callbacks import CheckpointCallback, MultiEvalCallback, TrainingEpisodeCallback
 from src.utils.config import load_config
 
 
@@ -159,7 +159,7 @@ def main() -> None:
         sync_tensorboard=True,
     )
 
-    env = TwoCarVecEnv()
+    env = TwoCarVecEnv(seed=seed)
     policy = ppo_cfg.pop("policy")
     model = PPO(policy, env, **ppo_cfg, seed=seed, verbose=1, tensorboard_log="runs")
 
@@ -175,6 +175,9 @@ def main() -> None:
         MultiEvalCallback(
             eval_freq=train_cfg["eval_freq"],
             n_episodes=train_cfg["eval_episodes"],
+        ),
+        TrainingEpisodeCallback(
+            log_path=ckpt_dir / "training_episodes.json",
         ),
     ]
     freeze_steps = args.freeze_actor_steps if args.freeze_actor_steps is not None else train_cfg.get("freeze_actor_steps", 0)
