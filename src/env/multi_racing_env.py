@@ -66,6 +66,8 @@ class MultiRacingEnv(ParallelEnv):
         self._step_count = 0
         self._screen = None
         self._clock = None
+        self._track_surface = None
+        self._fonts = None
 
     def observation_space(self, agent: str) -> spaces.Space:
         return self.observation_spaces[agent]
@@ -398,27 +400,13 @@ class MultiRacingEnv(ParallelEnv):
         if self.render_mode == "rgb_array":
             return frame
 
-    def _render_frame(self):
+    def _bake_track_surface(self, W: int, H: int, sidebar_x: int) -> None:
         import pygame
-        from .track import RAY_ANGLES
 
-        W, H = 1180, 660
-        SIDEBAR_X = 850
-        SIDEBAR_W = 330
-
-        if self._screen is None:
-            pygame.init()
-            if self.render_mode == "human":
-                self._screen = pygame.display.set_mode((W, H))
-                pygame.display.set_caption("Slipstream - Multi-Agent Racing")
-            else:
-                self._screen = pygame.Surface((W, H))
-            self._clock = pygame.time.Clock()
-
-        surf = self._screen
+        surf = pygame.Surface((W, H))
         surf.fill((20, 28, 21))
         for y in range(0, H, 36):
-            pygame.draw.rect(surf, (24, 34, 25), (0, y, SIDEBAR_X, 18))
+            pygame.draw.rect(surf, (24, 34, 25), (0, y, sidebar_x, 18))
 
         outer = [(int(x), int(y)) for x, y in self.track.outer]
         inner = [(int(x), int(y)) for x, y in self.track.inner]
@@ -500,6 +488,43 @@ class MultiRacingEnv(ParallelEnv):
             s_vec = norm0 * 6.0
             box_pts = [slot + f_vec + s_vec, slot + f_vec - s_vec, slot - f_vec - s_vec, slot - f_vec + s_vec]
             pygame.draw.polygon(surf, (215, 218, 225), [(int(p[0]), int(p[1])) for p in box_pts], 1)
+
+        self._track_surface = surf
+
+    def _render_frame(self):
+        import pygame
+        from .track import RAY_ANGLES
+
+        W, H = 1180, 660
+        SIDEBAR_X = 850
+        SIDEBAR_W = 330
+
+        if self._screen is None:
+            pygame.init()
+            if self.render_mode == "human":
+                self._screen = pygame.display.set_mode((W, H))
+                pygame.display.set_caption("Slipstream - Multi-Agent Racing")
+            else:
+                self._screen = pygame.Surface((W, H))
+            self._clock = pygame.time.Clock()
+
+        if self._track_surface is None:
+            self._bake_track_surface(W, H, SIDEBAR_X)
+
+        if self._fonts is None:
+            font_family = "ubuntu" if "ubuntu" in pygame.font.get_fonts() else "dejavusans"
+            mono_family = "ubuntumono" if "ubuntumono" in pygame.font.get_fonts() else "monospace"
+            self._fonts = {
+                "title": pygame.font.SysFont(font_family, 18, bold=True),
+                "sub": pygame.font.SysFont(font_family, 11, bold=True),
+                "body": pygame.font.SysFont(font_family, 12, bold=True),
+                "stat": pygame.font.SysFont(font_family, 13, bold=True),
+                "num": pygame.font.SysFont(mono_family, 13, bold=True),
+                "badge": pygame.font.SysFont(font_family, 11, bold=True),
+            }
+
+        surf = self._screen
+        surf.blit(self._track_surface, (0, 0))
 
         colors = {"agent_0": (0, 210, 255), "agent_1": (255, 95, 55)}
         ray_colors = {"agent_0": (0, 165, 215), "agent_1": (225, 115, 48)}
@@ -606,15 +631,12 @@ class MultiRacingEnv(ParallelEnv):
         pygame.draw.rect(surf, (14, 18, 24), (SIDEBAR_X, 0, SIDEBAR_W, H))
         pygame.draw.line(surf, (36, 46, 62), (SIDEBAR_X, 0), (SIDEBAR_X, H), 2)
 
-        font_family = "ubuntu" if "ubuntu" in pygame.font.get_fonts() else "dejavusans"
-        mono_family = "ubuntumono" if "ubuntumono" in pygame.font.get_fonts() else "monospace"
-
-        font_title = pygame.font.SysFont(font_family, 18, bold=True)
-        font_sub = pygame.font.SysFont(font_family, 11, bold=True)
-        font_body = pygame.font.SysFont(font_family, 12, bold=True)
-        font_stat = pygame.font.SysFont(font_family, 13, bold=True)
-        font_num = pygame.font.SysFont(mono_family, 13, bold=True)
-        font_badge = pygame.font.SysFont(font_family, 11, bold=True)
+        font_title = self._fonts["title"]
+        font_sub = self._fonts["sub"]
+        font_body = self._fonts["body"]
+        font_stat = self._fonts["stat"]
+        font_num = self._fonts["num"]
+        font_badge = self._fonts["badge"]
 
         surf.blit(font_title.render("SLIPSTREAM", True, (255, 255, 255)), (SIDEBAR_X + 18, 16))
         surf.blit(font_sub.render("PHASE 4 GRAND PRIX TELEMETRY", True, (130, 150, 180)), (SIDEBAR_X + 18, 40))
@@ -704,4 +726,6 @@ class MultiRacingEnv(ParallelEnv):
             import pygame
             pygame.quit()
             self._screen = None
+        self._track_surface = None
+        self._fonts = None
 
