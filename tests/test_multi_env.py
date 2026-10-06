@@ -459,4 +459,27 @@ def test_respawn_does_not_overlap_opponent():
     assert not ov
 
 
+def test_respawn_flag_per_step():
+    from src.env.multi_racing_env import MultiRacingEnv, AGENTS
+
+    env = MultiRacingEnv()
+    _, infos = env.reset(seed=0)
+    assert infos[AGENTS[0]]["respawn"] is False
+    assert infos[AGENTS[1]]["respawn"] is False
+
+    _, _, _, _, infos = env.step({a: np.array([0.0, 0.5]) for a in AGENTS})
+    assert infos[AGENTS[0]]["respawn"] is False
+    assert infos[AGENTS[1]]["respawn"] is False
+
+    env._state[AGENTS[0]]["pos"][:] = np.array([9999.0, 9999.0])
+    _, _, _, _, infos = env.step({a: np.array([0.0, 0.0]) for a in AGENTS})
+    assert infos[AGENTS[0]]["respawn"] is True
+    assert infos[AGENTS[1]]["respawn"] is False
+
+    _, _, _, _, infos = env.step({a: np.array([0.0, 0.0]) for a in AGENTS})
+    assert infos[AGENTS[0]]["respawn"] is False
+    assert infos[AGENTS[1]]["respawn"] is False
+
+
+
 
