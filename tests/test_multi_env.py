@@ -481,5 +481,24 @@ def test_respawn_flag_per_step():
     assert infos[AGENTS[1]]["respawn"] is False
 
 
+def test_vec_env_deterministic_resets_with_base_seed():
+    v1 = TwoCarVecEnv(seed=42)
+    v2 = TwoCarVecEnv(seed=42)
+
+    obs1 = v1.reset()
+    obs2 = v2.reset()
+    np.testing.assert_array_equal(obs1, obs2)
+
+    v1.env._step_count = 1999
+    v2.env._step_count = 1999
+    acts = np.zeros((2, 2), dtype=np.float32)
+    obs1_next, _, dones1, _ = v1.step(acts)
+    obs2_next, _, dones2, _ = v2.step(acts)
+    assert dones1.all()
+    assert dones2.all()
+    np.testing.assert_array_equal(obs1_next, obs2_next)
+
+
+
 
 
