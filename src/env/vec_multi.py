@@ -15,15 +15,19 @@ class TwoCarVecEnv(VecEnv):
     slot 0 -> agent_0 | slot 1 -> agent_1
     """
 
-    def __init__(self) -> None:
+    def __init__(self, seed: Optional[int] = None) -> None:
         self.env = MultiRacingEnv()
+        self.base_seed = seed
+        self.episode_count = 0
         obs_space = self.env.observation_space(AGENTS[0])
         act_space = self.env.action_space(AGENTS[0])
         super().__init__(num_envs=2, observation_space=obs_space, action_space=act_space)
         self._actions: Optional[np.ndarray] = None
 
     def reset(self) -> np.ndarray:
-        obs_dict, _ = self.env.reset()
+        reset_seed = None if self.base_seed is None else self.base_seed + self.episode_count
+        self.episode_count += 1
+        obs_dict, _ = self.env.reset(seed=reset_seed)
         return np.stack([obs_dict[a] for a in AGENTS])
 
     def step_async(self, actions: np.ndarray) -> None:
@@ -49,7 +53,9 @@ class TwoCarVecEnv(VecEnv):
             infos.append(info)
 
         if dones.any():
-            obs_reset_dict, _ = self.env.reset()
+            reset_seed = None if self.base_seed is None else self.base_seed + self.episode_count
+            self.episode_count += 1
+            obs_reset_dict, _ = self.env.reset(seed=reset_seed)
             obs = np.stack([obs_reset_dict[a] for a in AGENTS])
 
         self._actions = None
@@ -81,6 +87,8 @@ class TwoCarVecEnv(VecEnv):
         return [False] * len(self._resolve_indices(indices))
 
     def seed(self, seed: Optional[int] = None) -> Sequence[Optional[int]]:
+        self.base_seed = seed
+        self.episode_count = 0
         self.env.reset(seed=seed)
         return [seed, seed]
 
