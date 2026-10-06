@@ -436,4 +436,27 @@ def test_spawn_offset_configurable_and_no_overlap_step0_step1():
         assert not infos[AGENTS[1]]["collision"], f"Step 1 collision on seed {seed}"
 
 
+def test_respawn_does_not_overlap_opponent():
+    from src.env.multi_racing_env import MultiRacingEnv, AGENTS, CAR_HALF_LEN
+    from src.env.car import CAR_HALF_WIDTH
+    from src.env.collision import obb_overlap
+
+    env = MultiRacingEnv()
+    env.reset(seed=0)
+
+    idx = 100
+    env._state[AGENTS[1]]["pos"][:] = env.track.centerline[idx + 8]
+    env._state[AGENTS[1]]["heading"] = float(
+        np.arctan2(env.track.tangents[idx + 8, 1], env.track.tangents[idx + 8, 0])
+    )
+    env._state[AGENTS[0]]["pos"][:] = env.track.centerline[idx] + env.track.normals[idx] * 50.0
+
+    env._respawn(AGENTS[0])
+
+    s0 = env._state[AGENTS[0]]
+    s1 = env._state[AGENTS[1]]
+    ov, _, _ = obb_overlap(s0["pos"], s0["heading"], s1["pos"], s1["heading"], CAR_HALF_LEN, CAR_HALF_WIDTH)
+    assert not ov
+
+
 
