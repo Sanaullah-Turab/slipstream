@@ -31,12 +31,14 @@ def test_render_executes_multiple_steps_without_error():
 
 
 def test_render_chassis_matches_physical_obb_constants():
-    assert CAR_HALF_LEN == 20.0
-    assert CAR_HALF_WIDTH == 9.0
+    from src.env.track import TRACK_WIDTH
+    assert CAR_HALF_LEN == 13.0
+    assert CAR_HALF_WIDTH == 5.5
     total_len = 2.0 * CAR_HALF_LEN
     total_width = 2.0 * CAR_HALF_WIDTH
-    assert total_len == 40.0
-    assert total_width == 18.0
+    assert total_len == 26.0
+    assert total_width == 11.0
+    assert TRACK_WIDTH == 70.0
 
 
 def test_watch_multi_agent_parser():
