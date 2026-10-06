@@ -62,6 +62,7 @@ def _seed_everything(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    torch.set_num_threads(1)
 
 
 def _warm_start(model: PPO, checkpoint: str) -> None:
