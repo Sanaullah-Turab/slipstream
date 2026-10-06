@@ -355,15 +355,29 @@ class MultiRacingEnv(ParallelEnv):
 
     def _respawn(self, agent: str) -> None:
         s = self._state[agent]
-        opp_pos = self._state[AGENTS[1] if agent == AGENTS[0] else AGENTS[0]]["pos"]
+        opp = self._state[AGENTS[1] if agent == AGENTS[0] else AGENTS[0]]
+        opp_pos = opp["pos"]
+        opp_heading = opp["heading"]
 
         idx = self.track.nearest_idx(s["pos"])
         spawn_pos = self.track.centerline[idx].copy()
-
-        if np.linalg.norm(spawn_pos - opp_pos) < 2.0 * CAR_HALF_WIDTH:
-            spawn_pos = spawn_pos + self.track.normals[idx] * 2.0 * CAR_HALF_WIDTH
-
         heading = float(np.arctan2(self.track.tangents[idx, 1], self.track.tangents[idx, 0]))
+
+        if self.legacy_collision:
+            if np.linalg.norm(spawn_pos - opp_pos) < 2.0 * CAR_HALF_WIDTH:
+                spawn_pos = spawn_pos + self.track.normals[idx] * 2.0 * CAR_HALF_WIDTH
+        else:
+            ov, _, _ = obb_overlap(
+                spawn_pos, heading, opp_pos, opp_heading, CAR_HALF_LEN, CAR_HALF_WIDTH
+            )
+            while ov:
+                idx = (idx - self.spawn_offset_idx) % len(self.track.centerline)
+                spawn_pos = self.track.centerline[idx].copy()
+                heading = float(np.arctan2(self.track.tangents[idx, 1], self.track.tangents[idx, 0]))
+                ov, _, _ = obb_overlap(
+                    spawn_pos, heading, opp_pos, opp_heading, CAR_HALF_LEN, CAR_HALF_WIDTH
+                )
+
         ts = self.track.get_track_state(spawn_pos)
 
         s["pos"][:] = spawn_pos
