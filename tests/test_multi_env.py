@@ -408,4 +408,32 @@ def test_all_collision_events_classified_across_role_changes():
     assert counts["follower"] + counts["leader"] + counts["neutral"] == infos[AGENTS[0]]["collision_count"]
 
 
+def test_spawn_offset_configurable_and_no_overlap_step0_step1():
+    from src.env.multi_racing_env import MultiRacingEnv, AGENTS, DEFAULT_SPAWN_OFFSET_IDX, CAR_HALF_LEN
+    from src.env.car import CAR_HALF_WIDTH
+    from src.env.collision import obb_overlap
+
+    env = MultiRacingEnv()
+    assert env.spawn_offset_idx == DEFAULT_SPAWN_OFFSET_IDX
+    assert env.spawn_offset_idx == 15
+
+    custom_env = MultiRacingEnv(spawn_offset_idx=20)
+    assert custom_env.spawn_offset_idx == 20
+
+    for seed in range(200):
+        obs, _ = env.reset(seed=seed)
+        s0 = env._state[AGENTS[0]]
+        s1 = env._state[AGENTS[1]]
+        ov, _, _ = obb_overlap(
+            s0["pos"], s0["heading"],
+            s1["pos"], s1["heading"],
+            CAR_HALF_LEN, CAR_HALF_WIDTH,
+        )
+        assert not ov, f"Step 0 overlap on seed {seed}"
+
+        _, _, _, _, infos = env.step({a: np.zeros(2) for a in AGENTS})
+        assert not infos[AGENTS[0]]["collision"], f"Step 1 collision on seed {seed}"
+        assert not infos[AGENTS[1]]["collision"], f"Step 1 collision on seed {seed}"
+
+
 
