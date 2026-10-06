@@ -39,3 +39,59 @@ def test_checkpoint_callback_prunes_when_keep_last_specified(tmp_path):
     assert not (tmp_path / "model_10.zip").exists()
     assert (tmp_path / "model_20.zip").exists()
     assert (tmp_path / "model_30.zip").exists()
+
+
+def test_training_episode_callback_records_metrics(tmp_path):
+    import numpy as np
+    from src.training.callbacks import TrainingEpisodeCallback
+
+    log_file = tmp_path / "episodes.json"
+    cb = TrainingEpisodeCallback(log_path=log_file)
+    cb.num_timesteps = 100
+
+    cb.locals = {
+        "infos": [
+            {"respawn": True, "respawns": 1, "collision": False, "collision_count": 0, "steps_in_contact": 0},
+            {"respawn": False, "respawns": 0, "collision": False, "collision_count": 0, "steps_in_contact": 0},
+        ],
+        "dones": np.array([False, False]),
+    }
+    cb._on_step()
+
+    for _ in range(4):
+        cb.locals = {
+            "infos": [
+                {"respawn": False, "respawns": 1, "collision": False, "collision_count": 0, "steps_in_contact": 0},
+                {"respawn": False, "respawns": 0, "collision": False, "collision_count": 0, "steps_in_contact": 0},
+            ],
+            "dones": np.array([False, False]),
+        }
+        cb._on_step()
+
+    cb.locals = {
+        "infos": [
+            {"respawn": False, "respawns": 1, "collision": True, "collision_count": 1, "steps_in_contact": 1},
+            {"respawn": False, "respawns": 0, "collision": True, "collision_count": 1, "steps_in_contact": 1},
+        ],
+        "dones": np.array([False, False]),
+    }
+    cb._on_step()
+
+    cb.locals = {
+        "infos": [
+            {"respawn": False, "respawns": 1, "collision": False, "collision_count": 1, "steps_in_contact": 10},
+            {"respawn": False, "respawns": 0, "collision": False, "collision_count": 1, "steps_in_contact": 10},
+        ],
+        "dones": np.array([True, True]),
+    }
+    cb._on_step()
+    cb._on_training_end()
+
+    assert len(cb.episode_records) == 1
+    rec = cb.episode_records[0]
+    assert rec["step_contact_penalty"] == 10 * (-0.02)
+    assert rec["event_contact_penalty"] == 1 * (-0.1)
+    assert rec["respawns"] == 1
+    assert rec["events_near_respawn"] == 1
+    assert log_file.exists()
+
