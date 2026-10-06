@@ -48,3 +48,21 @@ def test_watch_multi_agent_parser():
     assert "slipstream-p4-1b-7b1372f/final" in args.checkpoint
     assert args.stochastic is False
 
+
+def test_render_caches_track_surface_and_fonts():
+    env = MultiRacingEnv(render_mode="rgb_array")
+    assert env._track_surface is None
+    assert env._fonts is None
+    env.reset(seed=42)
+    env.render()
+    assert env._track_surface is not None
+    assert env._fonts is not None
+    cached_surface = env._track_surface
+    cached_fonts = env._fonts
+    env.render()
+    assert env._track_surface is cached_surface
+    assert env._fonts is cached_fonts
+    env.close()
+    assert env._track_surface is None
+    assert env._fonts is None
+
