@@ -14,7 +14,8 @@ from .rewards import compute_reward, AgentState, DEFAULT_CONTACT_PENALTY, DEFAUL
 from .collision import obb_overlap, resolve_collision, classify_contact
 
 AGENTS = ["agent_0", "agent_1"]
-SPAWN_OFFSET_IDX = 10
+DEFAULT_SPAWN_OFFSET_IDX = 15
+SPAWN_OFFSET_IDX = DEFAULT_SPAWN_OFFSET_IDX
 MAX_OPP_DIST = 300.0
 CAR_HALF_LEN = 20.0
 LATERAL_HISTORY_LEN = 20
@@ -38,6 +39,7 @@ class MultiRacingEnv(ParallelEnv):
         contact_penalty: float = DEFAULT_CONTACT_PENALTY,
         contact_step_penalty: float = DEFAULT_CONTACT_STEP_PENALTY,
         legacy_collision: bool = False,
+        spawn_offset_idx: int = DEFAULT_SPAWN_OFFSET_IDX,
     ) -> None:
         super().__init__()
         self.track = Track()
@@ -46,6 +48,7 @@ class MultiRacingEnv(ParallelEnv):
         self.contact_penalty = contact_penalty
         self.contact_step_penalty = contact_step_penalty
         self.legacy_collision = legacy_collision
+        self.spawn_offset_idx = spawn_offset_idx
         self.possible_agents = AGENTS[:]
 
         obs_dim = 15 if legacy_collision else 19
@@ -79,7 +82,7 @@ class MultiRacingEnv(ParallelEnv):
         self.agents = AGENTS[:]
         self._step_count = 0
 
-        slots = [0, SPAWN_OFFSET_IDX]
+        slots = [0, self.spawn_offset_idx]
         if self.np_random.integers(0, 2):
             slots = slots[::-1]
 
