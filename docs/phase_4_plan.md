@@ -13,9 +13,9 @@ Before adding competitive rewards, the cars must exist as solid physical objects
 - **Momentum Transfer:** Implement inelastic collision responses (restitution 0.2 to 0.4). Fully elastic bounces will launch cars into walls; low restitution mimics heavy cars scrubbing speed upon contact.
 
 ### B. Aerodynamic Slipstreaming (Drafting)
-- **Mechanic:** Define a rear wake cone oriented by the leader heading with half-angle 0.26 rad (~15 deg) and total length 150.0 units. Draft intensity is continuous in [0, 1], exactly 0 at contact and below minimum gap 30.0 units, ramps linearly to 1.0 at peak gap 45.0 units, and decays linearly to 0 at 150.0 units. Lateral fade decreases linearly from 1.0 at wake center to 0 at the cone boundary `w = CAR_HALF_WIDTH + d_long * tan(0.26)`.
-- **Implementation:** Reduce drag by up to 40% (multiplier 0.6) and raise the speed ceiling by +15.0 u/s (from 150.0 up to 165.0 u/s) proportional to draft intensity. Exiting the cone decays speed through aerodynamic drag rather than snapping to 150.0.
-- **Calibration (Scripted Test):** Build a scripted setup (Leader on solo line, Follower inside zone) and measure how much gap the Follower closes on the longest straight. Tune the boost so a pass is possible on some laps, but not guaranteed.
+- **Mechanic:** Define a rear wake oriented by the leader heading with total length 150.0 units. Draft intensity is continuous in [0, 1], exactly 0 at contact and below minimum gap 30.0 units when in line (lateral offset below one car width, 11.0 units). When laterally offset by at least one car width, draft intensity persists until the follower center passes the leader center. Lateral falloff retains at least 0.8 intensity at lateral offset 14.0 and reaches 0 at lateral offset 22.0 units.
+- **Implementation:** Reduce drag by up to 80% (`DRAFT_DRAG_REDUCTION = 0.8`) and raise the speed ceiling by +35.0 u/s (from 150.0 up to 185.0 u/s, `DRAFT_SPEED_BOOST = 35.0`) proportional to draft intensity. Exiting the wake decays speed through aerodynamic drag rather than snapping to 150.0.
+- **Calibration (Scripted Test):** Scripted pass sweep confirmed passes are physically achievable on the main straight with boost 35.0 and drag reduction 0.8 from gap 45.0.
 
 ---
 
