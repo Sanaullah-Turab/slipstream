@@ -65,32 +65,30 @@ def compute_draft_intensity(
     d_long = -float(np.dot(delta, fwd))
     d_lat = abs(float(np.dot(delta, lat_vec)))
 
-    if d_long <= 0.0 or d_long > cone_length:
+    if d_long <= 0.0 or d_long > cone_length or d_lat >= 22.0:
         return 0.0
 
     car_width = 2.0 * CAR_HALF_WIDTH
+    if d_lat < car_width and d_long <= min_gap:
+        return 0.0
+
+    if d_lat <= 14.0:
+        fade_lat = 1.0 - 0.2 * (d_lat / 14.0)
+    else:
+        fade_lat = 0.8 * (22.0 - d_lat) / 8.0
+
     if d_lat < car_width:
-        if d_long <= min_gap:
-            return 0.0
-        cone_w = CAR_HALF_WIDTH + d_long * math.tan(cone_half_angle)
-        if d_lat >= cone_w:
-            return 0.0
-        fade_lat = 1.0 - (d_lat / cone_w)
         if d_long <= peak_gap:
             fade_long = (d_long - min_gap) / (peak_gap - min_gap)
         else:
             fade_long = 1.0 - (d_long - peak_gap) / (cone_length - peak_gap)
-        return float(np.clip(fade_long * fade_lat, 0.0, 1.0))
     else:
-        cone_w = CAR_HALF_WIDTH + max(d_long, peak_gap) * math.tan(cone_half_angle)
-        if d_lat >= cone_w:
-            return 0.0
-        fade_lat = 1.0 - (d_lat / cone_w)
         if d_long <= peak_gap:
             fade_long = 1.0
         else:
             fade_long = 1.0 - (d_long - peak_gap) / (cone_length - peak_gap)
-        return float(np.clip(fade_long * fade_lat, 0.0, 1.0))
+
+    return float(np.clip(fade_long * fade_lat, 0.0, 1.0))
 
 
 def aggregate_fault_counts(ep_infos: dict, agents: list[str] = AGENTS) -> dict[str, int]:
