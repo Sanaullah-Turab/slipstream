@@ -132,6 +132,7 @@ class MultiRacingEnv(ParallelEnv):
         self._step_count = 0
         self._current_leader = AGENTS[0]
         self._position_swaps = 0
+        self._last_respawn_step = {a: -9999 for a in AGENTS}
         self._screen = None
         self._clock = None
         self._track_surface = None
@@ -187,6 +188,7 @@ class MultiRacingEnv(ParallelEnv):
             }
 
         self._position_swaps = 0
+        self._last_respawn_step = {a: -9999 for a in AGENTS}
         race_pos_0 = self._state[AGENTS[0]]["start_offset"]
         race_pos_1 = self._state[AGENTS[1]]["start_offset"]
         self._current_leader = AGENTS[0] if race_pos_0 >= race_pos_1 else AGENTS[1]
@@ -441,10 +443,19 @@ class MultiRacingEnv(ParallelEnv):
 
         race_pos_0 = self._state[AGENTS[0]]["cumulative_distance"] + self._state[AGENTS[0]]["start_offset"]
         race_pos_1 = self._state[AGENTS[1]]["cumulative_distance"] + self._state[AGENTS[1]]["start_offset"]
-        new_leader = AGENTS[0] if race_pos_0 >= race_pos_1 else AGENTS[1]
-        if new_leader != self._current_leader:
-            self._position_swaps += 1
-            self._current_leader = new_leader
+        car_len = 2.0 * CAR_HALF_LEN
+        recent_respawn = any(self._step_count - self._last_respawn_step[a] <= 10 for a in AGENTS)
+
+        if self._current_leader == AGENTS[0]:
+            if race_pos_1 - race_pos_0 >= car_len:
+                self._current_leader = AGENTS[1]
+                if not recent_respawn:
+                    self._position_swaps += 1
+        else:
+            if race_pos_0 - race_pos_1 >= car_len:
+                self._current_leader = AGENTS[0]
+                if not recent_respawn:
+                    self._position_swaps += 1
 
         if self.enable_position_reward:
             r_pos_0 = compute_positional_reward(race_pos_0, race_pos_1, self.position_k, self.position_g0)
@@ -470,6 +481,7 @@ class MultiRacingEnv(ParallelEnv):
         return obs, rewards, terminations, truncations, infos
 
     def _respawn(self, agent: str) -> None:
+        self._last_respawn_step[agent] = self._step_count
         s = self._state[agent]
         opp = self._state[AGENTS[1] if agent == AGENTS[0] else AGENTS[0]]
         opp_pos = opp["pos"]
