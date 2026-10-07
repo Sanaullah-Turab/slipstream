@@ -172,7 +172,8 @@ class MultiEvalCallback(BaseCallback):
         leader_laps, follower_laps = [], []
         total_collisions, total_contact_steps = [], []
         total_respawns, progress_gaps = [], []
-        leader_paces, leader_speeds = [], []
+        leader_paces, follower_paces, pair_paces, leader_speeds = [], [], [], []
+        position_swaps = []
         faults_follower, faults_leader, faults_neutral = [], [], []
         global_col_crashes, global_solo_crashes = 0, 0
         total_steps = 0
@@ -219,6 +220,7 @@ class MultiEvalCallback(BaseCallback):
             follower_laps.append(ep_infos[follower]["laps"])
             total_collisions.append(ep_infos[_MULTI_AGENTS[0]]["collision_count"])
             total_contact_steps.append(ep_infos[_MULTI_AGENTS[0]].get("steps_in_contact", 0))
+            position_swaps.append(ep_infos[_MULTI_AGENTS[0]].get("position_swaps", 0))
 
             fault_counts = _aggregate_fault_counts(ep_infos, _MULTI_AGENTS)
             faults_follower.append(fault_counts["follower"])
@@ -231,7 +233,12 @@ class MultiEvalCallback(BaseCallback):
 
             leader_dist_laps = race_pos[leader] / self._track_length
             ep_pace = (leader_dist_laps / 2000.0) * 1000.0
+            follower_dist_laps = race_pos[follower] / self._track_length
+            ep_follower_pace = (follower_dist_laps / 2000.0) * 1000.0
+            ep_pair_pace = (ep_pace + ep_follower_pace) / 2.0
             leader_paces.append(ep_pace)
+            follower_paces.append(ep_follower_pace)
+            pair_paces.append(ep_pair_pace)
             leader_speeds.append(ep_pace * self._track_length / 1000.0)
 
         total_agent_steps = max(1, total_steps * 2)
@@ -245,6 +252,8 @@ class MultiEvalCallback(BaseCallback):
             "eval/follower/std_laps": statistics.stdev(follower_laps) if len(follower_laps) > 1 else 0.0,
             "eval/mean_collisions_per_ep": sum(total_collisions) / self.n_episodes,
             "eval/mean_steps_in_contact_per_ep": sum(total_contact_steps) / self.n_episodes,
+            "eval/mean_position_swaps_per_ep": sum(position_swaps) / self.n_episodes,
+            "eval/pair_pace": sum(pair_paces) / self.n_episodes,
             "eval/faults/follower_per_ep": sum(faults_follower) / self.n_episodes,
             "eval/faults/leader_per_ep": sum(faults_leader) / self.n_episodes,
             "eval/faults/neutral_per_ep": sum(faults_neutral) / self.n_episodes,
@@ -253,6 +262,7 @@ class MultiEvalCallback(BaseCallback):
             "eval/mean_respawns_per_ep": sum(total_respawns) / self.n_episodes,
             "eval/mean_progress_gap": sum(progress_gaps) / self.n_episodes,
             "eval/leader/mean_pace_dist": sum(leader_paces) / self.n_episodes,
+            "eval/follower/mean_pace_dist": sum(follower_paces) / self.n_episodes,
             "eval/leader/mean_speed": sum(leader_speeds) / self.n_episodes,
         }
         wandb.log(logs, step=self.num_timesteps)
