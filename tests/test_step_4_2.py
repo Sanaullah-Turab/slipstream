@@ -166,3 +166,44 @@ def test_position_swap_counter_in_info():
     env._state[AGENTS[1]]["cumulative_distance"] = 2000.0
     _, _, _, _, infos3 = env.step(actions)
     assert infos3[AGENTS[0]]["position_swaps"] >= 1
+
+
+def test_position_swap_ignores_jitter():
+    env = MultiRacingEnv()
+    env.reset(seed=42)
+    actions = {a: np.zeros(2, dtype=np.float32) for a in AGENTS}
+    env._state[AGENTS[0]]["start_offset"] = 0.0
+    env._state[AGENTS[1]]["start_offset"] = 0.0
+    env._state[AGENTS[0]]["cumulative_distance"] = 100.0
+    env._state[AGENTS[1]]["cumulative_distance"] = 90.0
+    env._current_leader = AGENTS[0]
+    env._position_swaps = 0
+
+    env._state[AGENTS[0]]["cumulative_distance"] = 100.0
+    env._state[AGENTS[1]]["cumulative_distance"] = 110.0
+    _, _, _, _, infos = env.step(actions)
+    assert infos[AGENTS[0]]["position_swaps"] == 0
+
+    env._state[AGENTS[0]]["cumulative_distance"] = 115.0
+    env._state[AGENTS[1]]["cumulative_distance"] = 110.0
+    _, _, _, _, infos = env.step(actions)
+    assert infos[AGENTS[0]]["position_swaps"] == 0
+
+
+def test_position_swap_ignores_respawn_induced_rank_change():
+    env = MultiRacingEnv()
+    env.reset(seed=42)
+    actions = {a: np.zeros(2, dtype=np.float32) for a in AGENTS}
+    env._state[AGENTS[0]]["start_offset"] = 0.0
+    env._state[AGENTS[1]]["start_offset"] = 0.0
+    env._state[AGENTS[0]]["cumulative_distance"] = 500.0
+    env._state[AGENTS[1]]["cumulative_distance"] = 100.0
+    env._current_leader = AGENTS[0]
+    env._position_swaps = 0
+
+    env._respawn(AGENTS[0])
+    env._state[AGENTS[0]]["cumulative_distance"] = 50.0
+    env._state[AGENTS[1]]["cumulative_distance"] = 200.0
+
+    _, _, _, _, infos = env.step(actions)
+    assert infos[AGENTS[0]]["position_swaps"] == 0
