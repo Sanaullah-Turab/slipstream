@@ -43,3 +43,9 @@ def test_steer_damp_reduces_normalized_rate():
     _, hr_slow = step_physics(slow, throttle=0.0, steer=1.0)
     _, hr_fast = step_physics(fast, throttle=0.0, steer=1.0)
     assert (hr_slow / slow.speed) > (hr_fast / fast.speed)
+
+
+def test_speed_on_cone_exit_decays_without_snapping():
+    state = CarState(x=0.0, y=0.0, heading=0.0, speed=165.0)
+    new, _ = step_physics(state, throttle=1.0, steer=0.0, draft_intensity=0.0)
+    assert 150.0 < new.speed < 165.0
