@@ -278,4 +278,42 @@ def test_calibrated_draft_constants():
     assert ENV_DRAFT_SPEED_BOOST == 35.0
 
 
+def test_draft_evaluation_symmetry_across_agents():
+    env_a = MultiRacingEnv(enable_draft=True)
+    env_a.reset(seed=42)
+    center = env_a.track.centerline[10].copy()
+    tang = env_a.track.tangents[10].copy()
+    heading = float(np.arctan2(tang[1], tang[0]))
+    fwd = np.array([math.cos(heading), math.sin(heading)])
+
+    env_a._state[AGENTS[1]]["pos"][:] = center
+    env_a._state[AGENTS[1]]["heading"] = heading
+    env_a._state[AGENTS[1]]["speed"] = 145.0
+    env_a._state[AGENTS[0]]["pos"][:] = center - fwd * 45.0
+    env_a._state[AGENTS[0]]["heading"] = heading
+    env_a._state[AGENTS[0]]["speed"] = 145.0
+
+    actions = {a: np.array([0.0, 1.0], dtype=np.float32) for a in AGENTS}
+    _, _, _, _, infos_a = env_a.step(actions)
+    draft_a = infos_a[AGENTS[0]]["draft_intensity"]
+    speed_a = infos_a[AGENTS[0]]["speed"]
+
+    env_b = MultiRacingEnv(enable_draft=True)
+    env_b.reset(seed=42)
+    env_b._state[AGENTS[0]]["pos"][:] = center
+    env_b._state[AGENTS[0]]["heading"] = heading
+    env_b._state[AGENTS[0]]["speed"] = 145.0
+    env_b._state[AGENTS[1]]["pos"][:] = center - fwd * 45.0
+    env_b._state[AGENTS[1]]["heading"] = heading
+    env_b._state[AGENTS[1]]["speed"] = 145.0
+
+    _, _, _, _, infos_b = env_b.step(actions)
+    draft_b = infos_b[AGENTS[1]]["draft_intensity"]
+    speed_b = infos_b[AGENTS[1]]["speed"]
+
+    assert np.isclose(draft_a, draft_b, atol=1e-6)
+    assert np.isclose(speed_a, speed_b, atol=1e-6)
+
+
+
 
