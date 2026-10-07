@@ -250,3 +250,24 @@ def test_draft_intensity_lateral_persistence_and_zeroing():
     offset_45_gap_20 = np.array([100.0 - 20.0, 100.0 + 45.0])
     assert compute_draft_intensity(offset_45_gap_20, leader_pos, leader_heading) == 0.0
 
+
+def test_draft_lateral_falloff_conditions():
+    leader_pos = np.array([100.0, 100.0])
+    leader_heading = 0.0
+
+    in_line_peak = np.array([100.0 - 45.0, 100.0])
+    offset_14_gap_45 = np.array([100.0 - 45.0, 100.0 + 14.0])
+    in_line_val = compute_draft_intensity(in_line_peak, leader_pos, leader_heading)
+    lat_14_val = compute_draft_intensity(offset_14_gap_45, leader_pos, leader_heading)
+    assert lat_14_val >= 0.8 * in_line_val
+
+    beyond_22 = np.array([100.0 - 45.0, 100.0 + 22.1])
+    assert compute_draft_intensity(beyond_22, leader_pos, leader_heading) == 0.0
+
+    in_line_below_min = np.array([100.0 - 20.0, 100.0])
+    assert compute_draft_intensity(in_line_below_min, leader_pos, leader_heading) == 0.0
+
+    sweet_spot_pos = np.array([100.0 - 45.0, 100.0])
+    assert compute_draft_intensity(sweet_spot_pos, leader_pos, leader_heading, in_contact=True) == 0.0
+
+
