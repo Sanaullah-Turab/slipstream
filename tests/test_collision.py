@@ -251,3 +251,47 @@ def test_classify_boundary_angle_is_neutral():
         follower_lateral=0.0,
     )
     assert result == "neutral"
+
+
+def test_env_rear_end_classification_symmetry():
+    from src.env.multi_racing_env import MultiRacingEnv, AGENTS
+
+    env_a = MultiRacingEnv(enable_draft=False, enable_position_reward=False)
+    env_a.reset(seed=42)
+    center = env_a.track.centerline[10].copy()
+    tang = env_a.track.tangents[10].copy()
+    heading = float(np.arctan2(tang[1], tang[0]))
+    fwd = np.array([math.cos(heading), math.sin(heading)])
+
+    env_a._state[AGENTS[0]]["pos"][:] = center
+    env_a._state[AGENTS[0]]["heading"] = heading
+    env_a._state[AGENTS[0]]["speed"] = 100.0
+    env_a._state[AGENTS[0]]["cumulative_distance"] = 500.0
+
+    env_a._state[AGENTS[1]]["pos"][:] = center - fwd * 20.0
+    env_a._state[AGENTS[1]]["heading"] = heading
+    env_a._state[AGENTS[1]]["speed"] = 140.0
+    env_a._state[AGENTS[1]]["cumulative_distance"] = 480.0
+
+    actions = {a: np.array([0.0, 1.0], dtype=np.float32) for a in AGENTS}
+    _, _, _, _, infos_a = env_a.step(actions)
+    fault_a = infos_a[AGENTS[1]]["fault_log"]["follower"]
+
+    env_b = MultiRacingEnv(enable_draft=False, enable_position_reward=False)
+    env_b.reset(seed=42)
+    env_b._state[AGENTS[1]]["pos"][:] = center
+    env_b._state[AGENTS[1]]["heading"] = heading
+    env_b._state[AGENTS[1]]["speed"] = 100.0
+    env_b._state[AGENTS[1]]["cumulative_distance"] = 500.0
+
+    env_b._state[AGENTS[0]]["pos"][:] = center - fwd * 20.0
+    env_b._state[AGENTS[0]]["heading"] = heading
+    env_b._state[AGENTS[0]]["speed"] = 140.0
+    env_b._state[AGENTS[0]]["cumulative_distance"] = 480.0
+
+    _, _, _, _, infos_b = env_b.step(actions)
+    fault_b = infos_b[AGENTS[0]]["fault_log"]["follower"]
+
+    assert fault_a == 1
+    assert fault_b == 1
+
