@@ -26,6 +26,7 @@ def evaluate_model_on_block(model, env: MultiRacingEnv, seed_start: int, n_episo
     ep_leader_paces = []
     ep_follower_paces = []
     ep_pair_paces = []
+    ep_position_swaps = []
 
     global_col_crashes = 0
     global_solo_crashes = 0
@@ -75,6 +76,7 @@ def evaluate_model_on_block(model, env: MultiRacingEnv, seed_start: int, n_episo
         ep_leader_paces.append(leader_pace)
         ep_follower_paces.append(follower_pace)
         ep_pair_paces.append(pair_pace)
+        ep_position_swaps.append(info[AGENTS[0]].get("position_swaps", 0))
 
     total_agent_steps = max(1, total_env_steps * 2)
     col_crash_rate = (global_col_crashes / total_agent_steps) * 1000.0
@@ -86,6 +88,9 @@ def evaluate_model_on_block(model, env: MultiRacingEnv, seed_start: int, n_episo
     mean_steps = float(np.mean(ep_contact_steps))
     steps_ci = compute_bootstrap_ci(ep_contact_steps)
 
+    mean_swaps = float(np.mean(ep_position_swaps))
+    swaps_ci = compute_bootstrap_ci(ep_position_swaps)
+
     return {
         "mean_events": mean_events,
         "events_ci": events_ci,
@@ -96,28 +101,46 @@ def evaluate_model_on_block(model, env: MultiRacingEnv, seed_start: int, n_episo
         "leader_pace": float(np.mean(ep_leader_paces)),
         "follower_pace": float(np.mean(ep_follower_paces)),
         "pair_pace": float(np.mean(ep_pair_paces)),
+        "mean_swaps": mean_swaps,
+        "swaps_ci": swaps_ci,
         "ep_events": [int(x) for x in ep_events],
         "ep_contact_steps": [int(x) for x in ep_contact_steps],
+        "ep_position_swaps": [int(x) for x in ep_position_swaps],
     }
 
 
 def format_results_markdown(results: list[dict]) -> str:
+    has_swaps = any("mean_swaps" in r for r in results)
     lines = [
         "# Contact and Crash Re-baseline (Current Geometry)",
         "",
         "Geometry: car 26x11 (half_len=13.0, half_width=5.5), track_width=70.0, spawn_offset_idx=15.",
         "Evaluation: 50 episodes per block, 2000 max steps, 10000-sample bootstrap 95% CIs.",
         "",
-        "| Checkpoint | Seed Range | Mode | Contact Events / ep (95% CI) | Contact Steps / ep (95% CI) | Col Crash / 1k | Solo Crash / 1k | Pair Pace (laps/1k) |",
-        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
     ]
+    if has_swaps:
+        lines.extend([
+            "| Checkpoint | Seed Range | Mode | Contact Events / ep (95% CI) | Contact Steps / ep (95% CI) | Col Crash / 1k | Solo Crash / 1k | Pair Pace (laps/1k) | Position Swaps / ep (95% CI) |",
+            "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+        ])
+    else:
+        lines.extend([
+            "| Checkpoint | Seed Range | Mode | Contact Events / ep (95% CI) | Contact Steps / ep (95% CI) | Col Crash / 1k | Solo Crash / 1k | Pair Pace (laps/1k) |",
+            "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+        ])
+
     for r in results:
-        lines.append(
+        base = (
             f"| {r['checkpoint']} | {r['seeds']} | {r['mode']} | "
             f"{r['mean_events']:.2f} [{r['events_ci'][0]:.2f}, {r['events_ci'][1]:.2f}] | "
             f"{r['mean_steps']:.2f} [{r['steps_ci'][0]:.2f}, {r['steps_ci'][1]:.2f}] | "
             f"{r['col_crash_rate']:.4f} | {r['solo_crash_rate']:.4f} | {r['pair_pace']:.4f} |"
         )
+        if has_swaps:
+            ms = r.get("mean_swaps", 0.0)
+            sci = r.get("swaps_ci", (0.0, 0.0))
+            base += f" {ms:.2f} [{sci[0]:.2f}, {sci[1]:.2f}] |"
+        lines.append(base)
     return "\n".join(lines) + "\n"
 
 
@@ -144,6 +167,8 @@ def _evaluate_worker(task: tuple[str, str, str, int, bool, int]) -> dict:
         "col_crash_rate": res["col_crash_rate"],
         "solo_crash_rate": res["solo_crash_rate"],
         "pair_pace": res["pair_pace"],
+        "mean_swaps": res["mean_swaps"],
+        "swaps_ci": res["swaps_ci"],
     }
 
 

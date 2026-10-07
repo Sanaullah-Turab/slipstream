@@ -8,9 +8,30 @@ from pettingzoo import ParallelEnv
 from gymnasium import spaces
 
 from .track import Track
-from .car import CarState, DEFAULT_PARAMS, DT, MAX_SPEED, CAR_HALF_WIDTH, step_physics
+from .car import (
+    CarState,
+    DEFAULT_PARAMS,
+    DT,
+    MAX_SPEED,
+    CAR_HALF_WIDTH,
+    step_physics,
+    DRAFT_CONE_LENGTH,
+    DRAFT_CONE_HALF_ANGLE,
+    DRAFT_MIN_GAP,
+    DRAFT_PEAK_GAP,
+    DRAFT_DRAG_REDUCTION,
+    DRAFT_SPEED_BOOST,
+)
 from .racing_env import MAX_STEPS, MAX_HEADING_RATE, MAX_RAY_DIST
-from .rewards import compute_reward, AgentState, DEFAULT_CONTACT_PENALTY, DEFAULT_CONTACT_STEP_PENALTY
+from .rewards import (
+    compute_reward,
+    AgentState,
+    DEFAULT_CONTACT_PENALTY,
+    DEFAULT_CONTACT_STEP_PENALTY,
+    DEFAULT_POSITION_K,
+    DEFAULT_POSITION_G0,
+    compute_positional_reward,
+)
 from .collision import obb_overlap, resolve_collision, classify_contact
 
 AGENTS = ["agent_0", "agent_1"]
@@ -19,6 +40,45 @@ SPAWN_OFFSET_IDX = DEFAULT_SPAWN_OFFSET_IDX
 MAX_OPP_DIST = 300.0
 CAR_HALF_LEN = 13.0
 LATERAL_HISTORY_LEN = 20
+
+POSITION_K = DEFAULT_POSITION_K
+POSITION_G0 = DEFAULT_POSITION_G0
+
+
+def compute_draft_intensity(
+    follower_pos: np.ndarray,
+    leader_pos: np.ndarray,
+    leader_heading: float,
+    in_contact: bool = False,
+    cone_length: float = DRAFT_CONE_LENGTH,
+    cone_half_angle: float = DRAFT_CONE_HALF_ANGLE,
+    min_gap: float = DRAFT_MIN_GAP,
+    peak_gap: float = DRAFT_PEAK_GAP,
+) -> float:
+    if in_contact:
+        return 0.0
+
+    fwd = np.array([math.cos(leader_heading), math.sin(leader_heading)])
+    lat_vec = np.array([-math.sin(leader_heading), math.cos(leader_heading)])
+    delta = follower_pos - leader_pos
+
+    d_long = -float(np.dot(delta, fwd))
+    d_lat = abs(float(np.dot(delta, lat_vec)))
+
+    if d_long <= min_gap or d_long > cone_length:
+        return 0.0
+
+    cone_w = CAR_HALF_WIDTH + d_long * math.tan(cone_half_angle)
+    if d_lat >= cone_w:
+        return 0.0
+
+    fade_lat = 1.0 - (d_lat / cone_w)
+    if d_long <= peak_gap:
+        fade_long = (d_long - min_gap) / (peak_gap - min_gap)
+    else:
+        fade_long = 1.0 - (d_long - peak_gap) / (cone_length - peak_gap)
+
+    return float(np.clip(fade_long * fade_lat, 0.0, 1.0))
 
 
 def aggregate_fault_counts(ep_infos: dict, agents: list[str] = AGENTS) -> dict[str, int]:
@@ -35,9 +95,12 @@ class MultiRacingEnv(ParallelEnv):
     def __init__(
         self,
         render_mode: Optional[str] = None,
-        enable_draft: bool = False,
+        enable_draft: bool = True,
+        enable_position_reward: bool = True,
         contact_penalty: float = DEFAULT_CONTACT_PENALTY,
         contact_step_penalty: float = DEFAULT_CONTACT_STEP_PENALTY,
+        position_k: float = DEFAULT_POSITION_K,
+        position_g0: float = DEFAULT_POSITION_G0,
         legacy_collision: bool = False,
         spawn_offset_idx: int = DEFAULT_SPAWN_OFFSET_IDX,
     ) -> None:
@@ -45,8 +108,11 @@ class MultiRacingEnv(ParallelEnv):
         self.track = Track()
         self.render_mode = render_mode
         self.enable_draft = enable_draft
+        self.enable_position_reward = enable_position_reward
         self.contact_penalty = contact_penalty
         self.contact_step_penalty = contact_step_penalty
+        self.position_k = position_k
+        self.position_g0 = position_g0
         self.legacy_collision = legacy_collision
         self.spawn_offset_idx = spawn_offset_idx
         self.possible_agents = AGENTS[:]
@@ -64,6 +130,8 @@ class MultiRacingEnv(ParallelEnv):
 
         self._state: dict = {}
         self._step_count = 0
+        self._current_leader = AGENTS[0]
+        self._position_swaps = 0
         self._screen = None
         self._clock = None
         self._track_surface = None
@@ -115,7 +183,13 @@ class MultiRacingEnv(ParallelEnv):
                 "start_offset": ts.arc_length,
                 "lateral_history": [ts.lateral] * LATERAL_HISTORY_LEN,
                 "fault_log": {"follower": 0, "leader": 0, "neutral": 0},
+                "draft_intensity": 0.0,
             }
+
+        self._position_swaps = 0
+        race_pos_0 = self._state[AGENTS[0]]["start_offset"]
+        race_pos_1 = self._state[AGENTS[1]]["start_offset"]
+        self._current_leader = AGENTS[0] if race_pos_0 >= race_pos_1 else AGENTS[1]
 
         obs = {a: self._build_obs(a) for a in self.agents}
         info = {a: self._build_info(a) for a in self.agents}
@@ -154,8 +228,16 @@ class MultiRacingEnv(ParallelEnv):
         rel_heading = opp["heading"] - s["heading"]
         opp_rel_heading = float(np.clip(math.sin(rel_heading), -1.0, 1.0))
 
-        # Draft flag continuous [0,1] (dim 18) - stub for 4.1, activated in 4.2
-        draft_flag = 0.0
+        if self.enable_draft:
+            draft_ego = compute_draft_intensity(
+                s["pos"], opp["pos"], opp["heading"], in_contact=s["prev_colliding"]
+            )
+            draft_opp = compute_draft_intensity(
+                opp["pos"], s["pos"], s["heading"], in_contact=s["prev_colliding"]
+            )
+        else:
+            draft_ego = 0.0
+            draft_opp = 0.0
 
         base_obs = [
             s["speed"] / MAX_SPEED,
@@ -177,8 +259,8 @@ class MultiRacingEnv(ParallelEnv):
             base_obs + [
                 opp_vel_ego_lat,
                 opp_rel_heading,
-                draft_flag,
-                draft_flag,
+                draft_ego,
+                draft_opp,
             ],
             dtype=np.float32,
         )
@@ -198,6 +280,9 @@ class MultiRacingEnv(ParallelEnv):
             "start_offset": s["start_offset"],
             "lateral_ratio": abs(s["lateral"]) / self.track.half_width,
             "fault_log": s["fault_log"].copy(),
+            "position_swaps": self._position_swaps,
+            "draft_intensity": s.get("draft_intensity", 0.0),
+            "is_drafting": s.get("draft_intensity", 0.0) > 0.0,
         }
 
     def step(self, actions: dict[str, np.ndarray]):
@@ -207,11 +292,21 @@ class MultiRacingEnv(ParallelEnv):
         infos = {}
 
         for agent in self.agents:
+            opp_agent = AGENTS[1] if agent == AGENTS[0] else AGENTS[0]
             s = self._state[agent]
+            opp = self._state[opp_agent]
             s["respawn"] = False
             action = actions[agent]
             steer = float(np.clip(action[0], -1.0, 1.0))
             throttle = float(np.clip(action[1], -1.0, 1.0))
+
+            if self.enable_draft:
+                draft_int = compute_draft_intensity(
+                    s["pos"], opp["pos"], opp["heading"], in_contact=s["prev_colliding"]
+                )
+            else:
+                draft_int = 0.0
+            s["draft_intensity"] = draft_int
 
             prev_state = AgentState(
                 pos=s["pos"].copy(),
@@ -226,7 +321,9 @@ class MultiRacingEnv(ParallelEnv):
             )
 
             car = CarState(x=s["pos"][0], y=s["pos"][1], heading=s["heading"], speed=s["speed"])
-            car, heading_rate = step_physics(car, throttle, steer, DEFAULT_PARAMS, DT)
+            car, heading_rate = step_physics(
+                car, throttle, steer, DEFAULT_PARAMS, DT, draft_intensity=draft_int
+            )
             s["pos"][:] = car.x, car.y
             s["heading"] = car.heading
             s["speed"] = car.speed
@@ -341,6 +438,19 @@ class MultiRacingEnv(ParallelEnv):
 
             for s in (s0, s1):
                 s["prev_colliding"] = overlapping
+
+        race_pos_0 = self._state[AGENTS[0]]["cumulative_distance"] + self._state[AGENTS[0]]["start_offset"]
+        race_pos_1 = self._state[AGENTS[1]]["cumulative_distance"] + self._state[AGENTS[1]]["start_offset"]
+        new_leader = AGENTS[0] if race_pos_0 >= race_pos_1 else AGENTS[1]
+        if new_leader != self._current_leader:
+            self._position_swaps += 1
+            self._current_leader = new_leader
+
+        if self.enable_position_reward:
+            r_pos_0 = compute_positional_reward(race_pos_0, race_pos_1, self.position_k, self.position_g0)
+            r_pos_1 = compute_positional_reward(race_pos_1, race_pos_0, self.position_k, self.position_g0)
+            rewards[AGENTS[0]] += r_pos_0
+            rewards[AGENTS[1]] += r_pos_1
 
         truncated = self._step_count >= MAX_STEPS
 

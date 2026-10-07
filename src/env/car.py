@@ -27,6 +27,13 @@ class CarParams(NamedTuple):
 DEFAULT_PARAMS = CarParams()
 MAX_SPEED = DEFAULT_PARAMS.max_speed
 
+DRAFT_CONE_LENGTH = 150.0
+DRAFT_CONE_HALF_ANGLE = 0.26
+DRAFT_MIN_GAP = 30.0
+DRAFT_PEAK_GAP = 45.0
+DRAFT_DRAG_REDUCTION = 0.4
+DRAFT_SPEED_BOOST = 15.0
+
 
 def step_physics(
     state: CarState,
@@ -34,12 +41,16 @@ def step_physics(
     steer: float,
     params: CarParams = DEFAULT_PARAMS,
     dt: float = DT,
+    draft_intensity: float = 0.0,
 ) -> tuple[CarState, float]:
     v = state.speed
     lr = params.wheelbase / 2.0
 
-    accel = throttle * params.max_accel - params.drag * v * v - params.rolling * v
-    v_new = max(0.0, min(v + accel * dt, params.max_speed))
+    eff_drag = params.drag * (1.0 - DRAFT_DRAG_REDUCTION * draft_intensity)
+    eff_max_speed = params.max_speed + DRAFT_SPEED_BOOST * draft_intensity
+
+    accel = throttle * params.max_accel - eff_drag * v * v - params.rolling * v
+    v_new = max(0.0, min(v + accel * dt, eff_max_speed))
 
     steer_eff = steer * params.max_steer * (1.0 - params.steer_damp * v / params.max_speed)
     beta = math.atan(0.5 * math.tan(steer_eff))
@@ -55,3 +66,4 @@ def step_physics(
         ),
         heading_rate,
     )
+
