@@ -47,3 +47,21 @@ def test_format_results_markdown():
     assert "0.0100" in md
     assert "2.7100" in md
 
+
+def test_stochastic_eval_reproducibility():
+    import torch
+
+    class DummyPolicy:
+        def predict(self, obs, deterministic=True):
+            if deterministic:
+                return np.zeros((len(obs), 2), dtype=np.float32), None
+            return torch.randn(len(obs), 2).numpy(), None
+
+    env = MultiRacingEnv()
+    model = DummyPolicy()
+    res1 = evaluate_model_on_block(model, env, seed_start=1000, n_episodes=2, stochastic=True)
+    res2 = evaluate_model_on_block(model, env, seed_start=1000, n_episodes=2, stochastic=True)
+    assert res1["ep_events"] == res2["ep_events"]
+    assert res1["ep_contact_steps"] == res2["ep_contact_steps"]
+    assert np.isclose(res1["pair_pace"], res2["pair_pace"])
+
