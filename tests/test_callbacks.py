@@ -95,3 +95,25 @@ def test_training_episode_callback_records_metrics(tmp_path):
     assert rec["events_near_respawn"] == 1
     assert log_file.exists()
 
+
+def test_multi_eval_callback_logs_position_swaps_and_pair_pace(monkeypatch):
+    import numpy as np
+    from src.training.callbacks import MultiEvalCallback
+
+    logged_data = {}
+    monkeypatch.setattr("wandb.log", lambda data, step: logged_data.update(data))
+    monkeypatch.setattr("wandb.run", MagicMock())
+
+    cb = MultiEvalCallback(eval_freq=1, n_episodes=1)
+    cb.num_timesteps = 1
+    mock_model = MagicMock()
+    mock_model.predict.return_value = (np.zeros((2, 2), dtype=np.float32), None)
+    cb.model = mock_model
+    cb._on_training_start()
+    cb._on_step()
+    cb._on_training_end()
+
+    assert "eval/mean_position_swaps_per_ep" in logged_data
+    assert "eval/pair_pace" in logged_data
+
+
