@@ -33,7 +33,7 @@ def _progress_reward(curr: AgentState, prev: AgentState, track: Track) -> float:
 
 
 def _speed_reward(curr: AgentState) -> float:
-    return 0.3 * curr.speed / MAX_SPEED
+    return 0.3 * min(curr.speed, MAX_SPEED) / MAX_SPEED
 
 
 def _heading_reward(curr: AgentState) -> float:
