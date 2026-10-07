@@ -303,21 +303,25 @@ class MultiRacingEnv(ParallelEnv):
         truncations = {}
         infos = {}
 
+        draft_ints = {}
         for agent in self.agents:
             opp_agent = AGENTS[1] if agent == AGENTS[0] else AGENTS[0]
             s = self._state[agent]
             opp = self._state[opp_agent]
+            if self.enable_draft:
+                draft_ints[agent] = compute_draft_intensity(
+                    s["pos"], opp["pos"], opp["heading"], in_contact=s["prev_colliding"]
+                )
+            else:
+                draft_ints[agent] = 0.0
+
+        for agent in self.agents:
+            s = self._state[agent]
             s["respawn"] = False
             action = actions[agent]
             steer = float(np.clip(action[0], -1.0, 1.0))
             throttle = float(np.clip(action[1], -1.0, 1.0))
-
-            if self.enable_draft:
-                draft_int = compute_draft_intensity(
-                    s["pos"], opp["pos"], opp["heading"], in_contact=s["prev_colliding"]
-                )
-            else:
-                draft_int = 0.0
+            draft_int = draft_ints[agent]
             s["draft_intensity"] = draft_int
 
             prev_state = AgentState(
