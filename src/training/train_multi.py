@@ -70,9 +70,9 @@ def _warm_start(model: PPO, checkpoint: str) -> None:
 
     first_layer = getattr(source.policy.mlp_extractor.policy_net, "0")
     source_input_dim = first_layer.weight.shape[1]
-    if source_input_dim not in (11, 15):
+    if source_input_dim not in (11, 15, 19):
         raise ValueError(
-            f"Warm-start model has {source_input_dim} obs dims; expected 11 or 15."
+            f"Warm-start model has {source_input_dim} obs dims; expected 11, 15, or 19."
         )
 
     def _patch_net(multi_net, source_net):
@@ -82,7 +82,9 @@ def _warm_start(model: PPO, checkpoint: str) -> None:
                     if i == 0:
                         w_source = s_layer.weight.data
                         m_layer.weight.data[:, :w_source.shape[1]] = w_source
-                        m_layer.weight.data[:, w_source.shape[1]:] = 0.0
+                        if w_source.shape[1] < m_layer.weight.data.shape[1]:
+                            m_layer.weight.data[:, w_source.shape[1]:] = 0.0
+                        m_layer.weight.data[:, 17:] = 0.0
                     else:
                         m_layer.weight.data.copy_(s_layer.weight.data)
                 if hasattr(m_layer, "bias") and m_layer.bias is not None:
