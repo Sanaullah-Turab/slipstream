@@ -271,3 +271,11 @@ def test_draft_lateral_falloff_conditions():
     assert compute_draft_intensity(sweet_spot_pos, leader_pos, leader_heading, in_contact=True) == 0.0
 
 
+def test_calibrated_draft_constants():
+    assert DRAFT_DRAG_REDUCTION == 0.8
+    assert DRAFT_SPEED_BOOST == 35.0
+    assert ENV_DRAFT_DRAG_RED == 0.8
+    assert ENV_DRAFT_SPEED_BOOST == 35.0
+
+
+
