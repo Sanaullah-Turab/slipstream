@@ -33,7 +33,9 @@ def evaluate_model_on_block(model, env: MultiRacingEnv, seed_start: int, n_episo
     total_env_steps = 0
 
     for ep in range(n_episodes):
-        obs, _ = env.reset(seed=seed_start + ep)
+        seed = seed_start + ep
+        torch.manual_seed(seed)
+        obs, _ = env.reset(seed=seed)
         done = False
         ep_steps = 0
         prev_respawns = {a: 0 for a in AGENTS}
