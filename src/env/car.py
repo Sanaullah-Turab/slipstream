@@ -50,7 +50,10 @@ def step_physics(
     eff_max_speed = params.max_speed + DRAFT_SPEED_BOOST * draft_intensity
 
     accel = throttle * params.max_accel - eff_drag * v * v - params.rolling * v
-    v_new = max(0.0, min(v + accel * dt, eff_max_speed))
+    if v > eff_max_speed:
+        v_new = max(0.0, min(v, v + accel * dt))
+    else:
+        v_new = max(0.0, min(v + accel * dt, eff_max_speed))
 
     steer_eff = steer * params.max_steer * (1.0 - params.steer_damp * v / params.max_speed)
     beta = math.atan(0.5 * math.tan(steer_eff))
