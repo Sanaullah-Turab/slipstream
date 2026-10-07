@@ -232,3 +232,21 @@ def test_position_swap_ignores_respawn_induced_rank_change():
 
     _, _, _, _, infos = env.step(actions)
     assert infos[AGENTS[0]]["position_swaps"] == 0
+
+
+def test_draft_intensity_lateral_persistence_and_zeroing():
+    leader_pos = np.array([100.0, 100.0])
+    leader_heading = 0.0
+
+    in_line_below_min = np.array([100.0 - 20.0, 100.0])
+    assert compute_draft_intensity(in_line_below_min, leader_pos, leader_heading) == 0.0
+
+    sweet_spot_pos = np.array([100.0 - 45.0, 100.0])
+    assert compute_draft_intensity(sweet_spot_pos, leader_pos, leader_heading, in_contact=True) == 0.0
+
+    offset_12_gap_20 = np.array([100.0 - 20.0, 100.0 + 12.0])
+    assert compute_draft_intensity(offset_12_gap_20, leader_pos, leader_heading) > 0.0
+
+    offset_45_gap_20 = np.array([100.0 - 20.0, 100.0 + 45.0])
+    assert compute_draft_intensity(offset_45_gap_20, leader_pos, leader_heading) == 0.0
+
