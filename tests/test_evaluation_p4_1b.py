@@ -20,3 +20,30 @@ def test_compute_bootstrap_ci_bounds():
     assert low < mean < high
     assert low >= min(data)
     assert high <= max(data)
+
+
+def test_format_results_markdown():
+    from scripts.evaluate_p4_1b import format_results_markdown
+
+    results = [
+        {
+            "checkpoint": "Phase 3 Baseline",
+            "seeds": "1000-1049",
+            "mode": "Deterministic",
+            "mean_events": 5.2,
+            "events_ci": (4.5, 5.9),
+            "mean_steps": 120.4,
+            "steps_ci": (100.2, 140.6),
+            "col_crash_rate": 0.01,
+            "solo_crash_rate": 0.0,
+            "pair_pace": 2.71,
+        }
+    ]
+    md = format_results_markdown(results)
+    assert "| Checkpoint |" in md
+    assert "Phase 3 Baseline" in md
+    assert "5.20 [4.50, 5.90]" in md
+    assert "120.40 [100.20, 140.60]" in md
+    assert "0.0100" in md
+    assert "2.7100" in md
+
