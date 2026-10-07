@@ -121,6 +121,31 @@ def test_per_step_contact_penalty_applies_every_step_in_contact():
     assert np.isclose(rewards2[AGENTS[0]], expected_step2)
 
 
+def test_exact_per_step_contact_cost_is_minus_0_02():
+    env1 = MultiRacingEnv(enable_draft=False, enable_position_reward=False)
+    env1.reset(seed=42)
+    pos = env1.track.centerline[0].copy()
+    for a in AGENTS:
+        env1._state[a]["pos"][:] = pos
+        env1._state[a]["speed"] = 0.0
+
+    actions = {a: np.zeros(2, dtype=np.float32) for a in AGENTS}
+    env1.step(actions)
+    _, r_contact, _, _, _ = env1.step(actions)
+
+    env2 = MultiRacingEnv(enable_draft=False, enable_position_reward=False)
+    env2.reset(seed=42)
+    env2._state[AGENTS[0]]["pos"][:] = pos
+    env2._state[AGENTS[0]]["speed"] = 0.0
+    env2._state[AGENTS[1]]["pos"][:] = pos + np.array([200.0, 0.0])
+    env2._state[AGENTS[1]]["speed"] = 0.0
+    env2.step(actions)
+    _, r_no_contact, _, _, _ = env2.step(actions)
+
+    delta = r_contact[AGENTS[0]] - r_no_contact[AGENTS[0]]
+    assert np.isclose(delta, -0.02)
+
+
 
 def test_observation_dims_17_and_18_populated():
     env = MultiRacingEnv(enable_draft=True)
