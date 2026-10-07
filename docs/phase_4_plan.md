@@ -13,8 +13,8 @@ Before adding competitive rewards, the cars must exist as solid physical objects
 - **Momentum Transfer:** Implement inelastic collision responses (restitution 0.2 to 0.4). Fully elastic bounces will launch cars into walls; low restitution mimics heavy cars scrubbing speed upon contact.
 
 ### B. Aerodynamic Slipstreaming (Drafting)
-- **Mechanic:** Define a drafting zone oriented by the leader heading. The draft effect fades linearly with distance.
-- **Implementation:** Raise the `MAX_SPEED` cap and acceleration limits dynamically when a car is inside the zone.
+- **Mechanic:** Define a rear wake cone oriented by the leader heading with half-angle 0.26 rad (~15 deg) and total length 150.0 units. Draft intensity is continuous in [0, 1], exactly 0 at contact and below minimum gap 30.0 units, ramps linearly to 1.0 at peak gap 45.0 units, and decays linearly to 0 at 150.0 units. Lateral fade decreases linearly from 1.0 at wake center to 0 at the cone boundary `w = CAR_HALF_WIDTH + d_long * tan(0.26)`.
+- **Implementation:** Reduce drag by up to 40% (multiplier 0.6) and raise the speed ceiling by +15.0 u/s (from 150.0 up to 165.0 u/s) proportional to draft intensity. Exiting the cone decays speed through aerodynamic drag rather than snapping to 150.0.
 - **Calibration (Scripted Test):** Build a scripted setup (Leader on solo line, Follower inside zone) and measure how much gap the Follower closes on the longest straight. Tune the boost so a pass is possible on some laps, but not guaranteed.
 
 ---
@@ -23,7 +23,7 @@ Before adding competitive rewards, the cars must exist as solid physical objects
 
 ### A. Continuous Zero-Sum Positional Reward
 To avoid flickering signals when cars are side-by-side:
-- **Formula:** `r_pos = k * clip((my_dist - opp_dist) / g0, -1, 1)` where `g0` is ~1 car length.
+- **Formula:** `r_pos = k * clip((dist_ego - dist_opp) / g0, -1, 1)` where `g0 = 50.0` units (~2 car lengths) and `k = 0.03`.
 - **Scaling:** Set `k` to 10-25% of the average step progress reward (e.g., if progress averages 0.2/step, `k` in range 0.02 to 0.05). Log both terms and tune.
 
 ### B. Fault-Assigned Collision Penalties
