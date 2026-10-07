@@ -64,3 +64,18 @@ def test_warm_start_phase3_15dim_to_19dim_equivalence():
 
     np.testing.assert_allclose(act_19, act_15, atol=1e-6)
 
+
+def test_warm_start_phase4_1b_19dim_draft_weights_zero():
+    checkpoint_path = "checkpoints/phase4/slipstream-p4-1b-7b1372f/final.zip"
+    env19 = TwoCarVecEnv()
+    model19 = PPO("MlpPolicy", env19, device="cpu")
+    _warm_start(model19, checkpoint_path)
+
+    pi_layer = getattr(model19.policy.mlp_extractor.policy_net, "0")
+    vf_layer = getattr(model19.policy.mlp_extractor.value_net, "0")
+
+    assert torch.norm(pi_layer.weight[:, 17]).item() == 0.0
+    assert torch.norm(pi_layer.weight[:, 18]).item() == 0.0
+    assert torch.norm(vf_layer.weight[:, 17]).item() == 0.0
+    assert torch.norm(vf_layer.weight[:, 18]).item() == 0.0
+
