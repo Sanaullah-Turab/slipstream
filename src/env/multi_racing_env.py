@@ -428,8 +428,9 @@ class MultiRacingEnv(ParallelEnv):
                         leader_agent, follower_agent = AGENTS[1], AGENTS[0]
                         leader_s, follower_s = s1, s0
 
+                    contact_normal = -normal if leader_agent == AGENTS[0] else normal
                     fault = classify_contact(
-                        normal=normal,
+                        normal=contact_normal,
                         heading_leader=leader_s["heading"],
                         vel_a=s0["speed"] * np.array([math.cos(s0["heading"]), math.sin(s0["heading"])]),
                         vel_b=s1["speed"] * np.array([math.cos(s1["heading"]), math.sin(s1["heading"])]),
