@@ -99,3 +99,84 @@ def evaluate_model_on_block(model, env: MultiRacingEnv, seed_start: int, n_episo
         "ep_events": [int(x) for x in ep_events],
         "ep_contact_steps": [int(x) for x in ep_contact_steps],
     }
+
+
+def format_results_markdown(results: list[dict]) -> str:
+    lines = [
+        "# Contact and Crash Re-baseline (Current Geometry)",
+        "",
+        "Geometry: car 26x11 (half_len=13.0, half_width=5.5), track_width=70.0, spawn_offset_idx=15.",
+        "Evaluation: 50 episodes per block, 2000 max steps, 10000-sample bootstrap 95% CIs.",
+        "",
+        "| Checkpoint | Seed Range | Mode | Contact Events / ep (95% CI) | Contact Steps / ep (95% CI) | Col Crash / 1k | Solo Crash / 1k | Pair Pace (laps/1k) |",
+        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+    ]
+    for r in results:
+        lines.append(
+            f"| {r['checkpoint']} | {r['seeds']} | {r['mode']} | "
+            f"{r['mean_events']:.2f} [{r['events_ci'][0]:.2f}, {r['events_ci'][1]:.2f}] | "
+            f"{r['mean_steps']:.2f} [{r['steps_ci'][0]:.2f}, {r['steps_ci'][1]:.2f}] | "
+            f"{r['col_crash_rate']:.4f} | {r['solo_crash_rate']:.4f} | {r['pair_pace']:.4f} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _evaluate_worker(task: tuple[str, str, str, int, bool, int]) -> dict:
+    checkpoint_name, checkpoint_path, seed_name, seed_start, stochastic, n_episodes = task
+    torch.set_num_threads(1)
+    env = MultiRacingEnv()
+    model = load_model(checkpoint_path, env)
+    res = evaluate_model_on_block(
+        model,
+        env,
+        seed_start=seed_start,
+        n_episodes=n_episodes,
+        stochastic=stochastic,
+    )
+    return {
+        "checkpoint": checkpoint_name,
+        "seeds": seed_name,
+        "mode": "Stochastic" if stochastic else "Deterministic",
+        "mean_events": res["mean_events"],
+        "events_ci": res["events_ci"],
+        "mean_steps": res["mean_steps"],
+        "steps_ci": res["steps_ci"],
+        "col_crash_rate": res["col_crash_rate"],
+        "solo_crash_rate": res["solo_crash_rate"],
+        "pair_pace": res["pair_pace"],
+    }
+
+
+def run_evaluation(output_md_path: str = "docs/rebaseline_results.md", n_episodes: int = 50) -> list[dict]:
+    import os
+    from multiprocessing import Pool
+
+    checkpoints = [
+        ("Phase 3 Baseline", "checkpoints/multi-A/slipstream-multi-A-84a9ee1/final.zip"),
+        ("slipstream-p4-1b-7b1372f final", "checkpoints/phase4/slipstream-p4-1b-7b1372f/final.zip"),
+    ]
+    seed_blocks = [
+        ("1000-1049", 1000),
+        ("2000-2049", 2000),
+    ]
+    tasks = []
+    for ckpt_name, ckpt_path in checkpoints:
+        for seed_name, seed_start in seed_blocks:
+            for stoch in (False, True):
+                tasks.append((ckpt_name, ckpt_path, seed_name, seed_start, stoch, n_episodes))
+
+    num_processes = min(len(tasks), os.cpu_count() or 4)
+    with Pool(processes=num_processes) as pool:
+        results = pool.map(_evaluate_worker, tasks)
+
+    if output_md_path:
+        md_content = format_results_markdown(results)
+        Path(output_md_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_md_path).write_text(md_content)
+
+    return results
+
+
+if __name__ == "__main__":
+    run_evaluation()
+
