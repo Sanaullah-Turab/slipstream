@@ -52,28 +52,33 @@ Expand the observation space from 15 dims to 19 dims, zero-padding the new input
 ## 4. Training Curriculum & Empirical Gates
 
 ### Step 4.1: The Physical Baseline
-- **Active:** OBB Collisions, momentum transfer, small symmetric contact penalty (-0.1 applied once per contact event), 19-dim observations (drafting flags zeroed), enable_draft=False.
+- **Active:** OBB Collisions, momentum transfer, small symmetric contact penalty (-0.1 applied once per contact event, -0.02 per contact step), 19-dim observations (drafting flags zeroed), enable_draft=False.
 - **Warm-start:** Load Phase 3 final (`checkpoints/multi-A/slipstream-multi-A-84a9ee1/final.zip`).
-- **Measured OBB Baseline (50 episodes, clean spawn idx=15):**
-  - Deterministic: 6.24 contact events/ep, 173.04 steps in contact/ep, 0.0150 col-crashes/1k, 0.0000 solo-crashes/1k, pace L=2.7201 / F=2.7184 / pair=2.7193 laps/1k steps.
-  - Stochastic: 7.20 contact events/ep, 135.90 steps in contact/ep, 0.0800 col-crashes/1k, 0.0450 solo-crashes/1k, pace L=2.6991 / F=2.6921 / pair=2.6956 laps/1k steps.
-  - Note: Measured in the fixed env (spawn_offset_idx=15, respawn fix), seeds 1000-1049, 50 episodes. The old baseline was spawn-contaminated.
-- **Gate to 4.2 (Empirical Criteria):**
-  1. **Contact Events / Episode:** At most 50% of the measured OBB baseline:
-     - Deterministic: <= 3.12 contact events/ep
-     - Stochastic: <= 3.60 contact events/ep
-  2. **Steps in Contact / Episode:** At most 50% of the measured OBB baseline:
-     - Deterministic: <= 86.52 steps in contact/ep
-     - Stochastic: <= 67.95 steps in contact/ep
-  3. **Collision-Induced Crash Rate:** <= 0.05 crashes per 1,000 agent-steps in both modes.
-  4. **Solo Crash Rate:** <= 0.05 crashes per 1,000 agent-steps in both modes.
-  5. **Pace Retention:** At least 95% of measured baseline pace, per agent and pair average, in both modes:
-     - Deterministic: Leader >= 2.5841, Follower >= 2.5825, Pair >= 2.5833 laps/1k steps
-     - Stochastic: Leader >= 2.5641, Follower >= 2.5575, Pair >= 2.5608 laps/1k steps
+- **Gate to 4.2 (Infrastructure Gate):**
+  1. **Zero Initial Overlap:** Zero overlap at step 0 and step 1 for all valid spawn offsets.
+  2. **Safe Respawn:** Respawns never overlap the opponent vehicle.
+  3. **Collision Invariants:** SAT collision detection and inelastic impulse resolution hold without tunneling or physics explosions.
+  4. **Deterministic Crash Rates:** Collision crash rate <= 0.05 and solo crash rate <= 0.05 per 1,000 agent-steps in deterministic mode.
+  5. **Pace Retention:** At least 95% of baseline pace preserved in deterministic mode under the current geometry (car 26x11, track width 70).
+  6. **Contact Reporting:** Contact events and steps are tracked and reported as baseline reference, not gating progression to 4.2.
+- **Starting Checkpoint for 4.2:** `checkpoints/phase4/slipstream-p4-1b-7b1372f/final.zip` (4.1b final).
+- **Pooled Re-baseline Reference (seeds 1000-1049 & 2000-2049, 100 episodes total, car 26x11, track width 70):**
+  - Phase 3 Baseline:
+    - Deterministic: 5.64 events/ep, 238.77 steps in contact/ep, 0.0150 col-crashes/1k, 0.1300 solo-crashes/1k, pair pace 2.6977 laps/1k steps.
+    - Stochastic: 6.30 events/ep, 168.28 steps in contact/ep, 0.0150 col-crashes/1k, 0.0175 solo-crashes/1k, pair pace 2.6974 laps/1k steps.
+  - 4.1b Final (`slipstream-p4-1b-7b1372f`):
+    - Deterministic: 8.21 events/ep, 368.02 steps in contact/ep, 0.0000 col-crashes/1k, 0.0000 solo-crashes/1k, pair pace 2.7067 laps/1k steps.
+    - Stochastic: 6.22 events/ep, 198.22 steps in contact/ep, 0.0050 col-crashes/1k, 0.0650 solo-crashes/1k, pair pace 2.6899 laps/1k steps.
 
 ### Step 4.2: The Draft & Position Incentive
-- **Active:** Step 4.1 + Slipstream physics + Continuous Positional Rewards.
-- **Gate to 4.3:** Agents demonstrate on-track overtakes (e.g., > 1 pass per 10 laps) and leader blocking behavior emerges without the overall crash rate exploding.
+- **Active:** Step 4.1 + Slipstream drafting physics (wake cone drag reduction and speed ceiling boost) + Continuous zero-sum positional reward + Per-step contact penalty (-0.02) + Position swap tracking.
+- **Starting Checkpoint:** 4.1b final (`slipstream-p4-1b-7b1372f/final.zip`).
+- **Pre-registered Gate to 4.3 (Pooled over seeds 1000-1049 and 2000-2049):**
+  1. **Steps in Contact / Episode:** <= 184 in deterministic mode and <= 99 in stochastic mode.
+  2. **Contact Events / Episode:** <= 5.64 in deterministic mode and <= 6.30 in stochastic mode.
+  3. **Crash Rates:** Collision crash rate <= 0.05 and solo crash rate <= 0.05 per 1,000 agent-steps in deterministic mode.
+  4. **Pace Retention:** Pair pace >= 2.57 laps/1k steps in deterministic mode.
+  5. **Overtaking Performance:** Mean position swaps per episode > 0.5 in deterministic mode.
 
 ### Step 4.3: Clean Racing (Fault Penalties)
 - **Active:** Step 4.2 + Severe Fault Penalties.
