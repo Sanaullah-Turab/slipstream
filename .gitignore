@@ -52,4 +52,5 @@ Thumbs.db
 lateral_plot.png
 # Scratch and Results
 scratch_scripts/
+scratch/
 results/

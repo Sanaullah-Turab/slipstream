@@ -33,7 +33,7 @@ def _progress_reward(curr: AgentState, prev: AgentState, track: Track) -> float:
 
 
 def _speed_reward(curr: AgentState) -> float:
-    return 0.3 * curr.speed / MAX_SPEED
+    return 0.3 * min(curr.speed, MAX_SPEED) / MAX_SPEED
 
 
 def _heading_reward(curr: AgentState) -> float:
@@ -65,3 +65,30 @@ def compute_reward(curr: AgentState, prev: AgentState, track: Track) -> float:
         + _lateral_penalty(curr, track)
         + _lap_bonus(curr, prev)
     )
+
+
+DEFAULT_CONTACT_PENALTY = -0.1
+DEFAULT_CONTACT_STEP_PENALTY = -0.02
+DEFAULT_POSITION_K = 0.03
+DEFAULT_POSITION_G0 = 50.0
+
+
+def contact_penalty(penalty: float = DEFAULT_CONTACT_PENALTY) -> float:
+    return penalty
+
+
+def contact_step_penalty(penalty: float = DEFAULT_CONTACT_STEP_PENALTY) -> float:
+    return penalty
+
+
+def compute_positional_reward(
+    dist_ego: float,
+    dist_opp: float,
+    k: float = DEFAULT_POSITION_K,
+    g0: float = DEFAULT_POSITION_G0,
+) -> float:
+    diff = dist_ego - dist_opp
+    return float(k * np.clip(diff / g0, -1.0, 1.0))
+
+
+

@@ -81,6 +81,12 @@ class TestSpeedReward:
     def test_speed_scaling(self, speed, expected):
         assert _speed_reward(_state(speed=speed)) == pytest.approx(expected, rel=1e-6)
 
+    def test_speed_above_max_speed_is_capped(self):
+        r_max = _speed_reward(_state(speed=MAX_SPEED))
+        r_draft = _speed_reward(_state(speed=MAX_SPEED + 15.0))
+        assert r_draft == pytest.approx(r_max, rel=1e-6)
+        assert r_draft == pytest.approx(0.3, rel=1e-6)
+
 
 # ---------------------------------------------------------------------------
 # Heading
@@ -208,3 +214,24 @@ class TestComputeReward:
             + _lap_bonus(curr, prev)
         )
         assert compute_reward(curr, prev, track) == pytest.approx(expected, rel=1e-6)
+
+
+class TestContactPenalty:
+    def test_default_value(self):
+        from src.env.rewards import contact_penalty, DEFAULT_CONTACT_PENALTY
+        assert DEFAULT_CONTACT_PENALTY == -0.1
+        assert contact_penalty() == -0.1
+
+    def test_custom_value(self):
+        from src.env.rewards import contact_penalty
+        assert contact_penalty(-0.25) == -0.25
+
+    def test_step_penalty_default_value(self):
+        from src.env.rewards import contact_step_penalty, DEFAULT_CONTACT_STEP_PENALTY
+        assert DEFAULT_CONTACT_STEP_PENALTY == -0.02
+        assert contact_step_penalty() == -0.02
+
+    def test_step_penalty_custom_value(self):
+        from src.env.rewards import contact_step_penalty
+        assert contact_step_penalty(-0.05) == -0.05
+

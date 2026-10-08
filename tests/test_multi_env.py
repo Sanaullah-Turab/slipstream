@@ -34,7 +34,7 @@ def test_obs_shape():
     env = MultiRacingEnv()
     obs, _ = env.reset(seed=0)
     for a in AGENTS:
-        assert obs[a].shape == (15,)
+        assert obs[a].shape == (19,)
 
 
 def test_step_all_keys():
@@ -47,7 +47,7 @@ def test_step_all_keys():
 def test_info_keys():
     env = make_env()
     _, _, _, _, infos = env.step(zero_actions(env))
-    expected = {"laps", "progress", "speed", "respawns", "collision_count", "cumulative_distance"}
+    expected = {"laps", "progress", "speed", "respawns", "collision_count", "cumulative_distance", "fault_log"}
     assert expected.issubset(set(infos[AGENTS[0]].keys()))
 
 
@@ -153,11 +153,11 @@ def test_truncation():
 def test_vec_env_shape():
     env = TwoCarVecEnv()
     obs = np.asarray(env.reset())
-    assert obs.shape == (2, 15)
+    assert obs.shape == (2, 19)
     actions = np.stack([env.action_space.sample() for _ in range(2)])
     obs_step, rewards, dones, infos = env.step(actions)
     obs_step = np.asarray(obs_step)
-    assert obs_step.shape == (2, 15)
+    assert obs_step.shape == (2, 19)
     assert rewards.shape == (2,)
     assert dones.shape == (2,)
     env.close()
@@ -173,7 +173,7 @@ def test_vec_env_truncation_terminal_obs():
     for info in infos:
         assert "terminal_observation" in info
         assert info["TimeLimit.truncated"] is True
-        assert info["terminal_observation"].shape == (15,)
+        assert info["terminal_observation"].shape == (19,)
     vec.close()
 
 
@@ -225,3 +225,279 @@ def test_parallel_api():
     from pettingzoo.test import parallel_api_test
     env = MultiRacingEnv()
     parallel_api_test(env, num_cycles=10)
+
+
+def test_warm_start_19dim_produces_same_actions_as_15dim():
+    """Zero-padded 19-dim warm start: first layer must accept (19,) and last 4 input weights zero."""
+    import torch
+    from stable_baselines3 import PPO
+    from src.env.vec_multi import TwoCarVecEnv
+
+    env_19 = TwoCarVecEnv()
+    model_19 = PPO("MlpPolicy", env_19, seed=0)
+
+    first_layer = getattr(model_19.policy.mlp_extractor.policy_net, "0")
+    assert first_layer.weight.shape[1] == 19
+
+    with torch.no_grad():
+        w = first_layer.weight.data.clone()
+        w[:, 15:] = 0.0
+        first_layer.weight.data = w
+
+    # Build 19-dim obs with last 4 zeros, ensure output is stable (no NaN)
+    obs_19 = np.zeros((4, 19), dtype=np.float32)
+    obs_19[:, :15] = np.random.randn(4, 15).astype(np.float32)
+    acts, _ = model_19.predict(obs_19, deterministic=True)
+    assert not np.any(np.isnan(acts)), "NaN in actions from zero-padded 19-dim obs"
+    assert acts.shape == (4, 2)
+
+
+def test_obb_collision_logged_in_info():
+    env = MultiRacingEnv()
+    env.reset(seed=0)
+    pos = env.track.centerline[0].copy()
+    for a in AGENTS:
+        env._state[a]["pos"][:] = pos
+
+    _, _, _, _, infos = env.step(zero_actions(env))
+    total = sum(infos[a]["collision_count"] for a in AGENTS)
+    assert total > 0, "OBB collision at identical positions should be detected"
+
+
+def test_steps_in_contact_and_collision_flag_in_info():
+    env = MultiRacingEnv()
+    env.reset(seed=0)
+    pos = env.track.centerline[0].copy()
+    for a in AGENTS:
+        env._state[a]["pos"][:] = pos
+
+    _, _, _, _, infos1 = env.step(zero_actions(env))
+    assert infos1[AGENTS[0]]["collision"] is True
+    assert infos1[AGENTS[0]]["collision_count"] == 1
+    assert infos1[AGENTS[0]]["steps_in_contact"] == 1
+
+    _, _, _, _, infos2 = env.step(zero_actions(env))
+    assert infos2[AGENTS[0]]["collision"] is True
+    assert infos2[AGENTS[0]]["collision_count"] == 1
+    assert infos2[AGENTS[0]]["steps_in_contact"] == 2
+
+
+
+def test_fault_log_populated_on_collision():
+    env = MultiRacingEnv()
+    env.reset(seed=0)
+    pos = env.track.centerline[0].copy()
+    for a in AGENTS:
+        env._state[a]["pos"][:] = pos
+
+    env.step(zero_actions(env))
+    total_faults = sum(
+        sum(env._state[a]["fault_log"].values()) for a in AGENTS
+    )
+    assert total_faults > 0, "Fault log must be populated after a collision"
+
+
+def test_contact_penalty_applied_once_per_event():
+    env = MultiRacingEnv(contact_penalty=-0.1)
+    env.reset(seed=0)
+    pos = env.track.centerline[0].copy()
+    for a in AGENTS:
+        env._state[a]["pos"][:] = pos
+
+    _, r1, _, _, _ = env.step(zero_actions(env))
+    assert env._state[AGENTS[0]]["prev_colliding"] is True
+
+    _, r2, _, _, _ = env.step(zero_actions(env))
+    assert r1[AGENTS[0]] < r2[AGENTS[0]]
+    assert pytest.approx(r2[AGENTS[0]] - r1[AGENTS[0]], abs=1e-5) == 0.1
+
+
+def test_contact_penalty_configurable():
+    env = MultiRacingEnv(contact_penalty=-0.5, contact_step_penalty=-0.04)
+    assert env.contact_penalty == -0.5
+    assert env.contact_step_penalty == -0.04
+    env.reset(seed=0)
+    pos = env.track.centerline[0].copy()
+    for a in AGENTS:
+        env._state[a]["pos"][:] = pos
+
+    _, r1, _, _, _ = env.step(zero_actions(env))
+    _, r2, _, _, _ = env.step(zero_actions(env))
+    assert pytest.approx(r2[AGENTS[0]] - r1[AGENTS[0]], abs=1e-5) == 0.5
+
+
+def test_contact_step_penalty_applied_every_step():
+    env = MultiRacingEnv(contact_penalty=0.0, contact_step_penalty=-0.05)
+    env.reset(seed=0)
+    pos = env.track.centerline[0].copy()
+    for a in AGENTS:
+        env._state[a]["pos"][:] = pos
+
+    _, r1, _, _, _ = env.step(zero_actions(env))
+    _, r2, _, _, _ = env.step(zero_actions(env))
+    assert pytest.approx(r1[AGENTS[0]], abs=1e-5) == r2[AGENTS[0]]
+
+
+def test_fault_classification_logged_per_event_not_per_step():
+    env = MultiRacingEnv()
+    env.reset(seed=0)
+    pos = env.track.centerline[0].copy()
+    for a in AGENTS:
+        env._state[a]["pos"][:] = pos
+
+    env.step(zero_actions(env))
+    s0_faults_1 = sum(env._state[AGENTS[0]]["fault_log"].values())
+    s1_faults_1 = sum(env._state[AGENTS[1]]["fault_log"].values())
+    total_faults_1 = s0_faults_1 + s1_faults_1
+    assert total_faults_1 > 0
+
+    env.step(zero_actions(env))
+    s0_faults_2 = sum(env._state[AGENTS[0]]["fault_log"].values())
+    s1_faults_2 = sum(env._state[AGENTS[1]]["fault_log"].values())
+    total_faults_2 = s0_faults_2 + s1_faults_2
+    assert total_faults_2 == total_faults_1
+
+
+def test_legacy_collision_env():
+    env = MultiRacingEnv(legacy_collision=True)
+    obs, _ = env.reset(seed=0)
+    for a in AGENTS:
+        assert obs[a].shape == (15,)
+    pos = env.track.centerline[0].copy()
+    for a in AGENTS:
+        env._state[a]["pos"][:] = pos
+    _, _, _, _, infos = env.step(zero_actions(env))
+    assert infos[AGENTS[0]]["collision"] is True
+    assert infos[AGENTS[0]]["collision_count"] == 1
+
+
+def test_finish_line_lap_tolerance():
+    from scripts.eval_multi import FINISH_LINE_TOLERANCE
+    assert FINISH_LINE_TOLERANCE == 7.0
+    track_len = 2434.61
+    laps = 5
+    cum_dist = laps * track_len - 6.49
+    expected_without_tol = int(cum_dist / track_len)
+    expected_with_tol = int((cum_dist + FINISH_LINE_TOLERANCE) / track_len)
+    assert laps > expected_without_tol
+    assert laps <= expected_with_tol
+
+
+def test_all_collision_events_classified_across_role_changes():
+    from src.env.multi_racing_env import aggregate_fault_counts, MultiRacingEnv, AGENTS
+    env = MultiRacingEnv()
+    _, infos = env.reset(seed=0)
+    infos[AGENTS[0]]["collision_count"] = 1
+    infos[AGENTS[0]]["fault_log"] = {"follower": 1, "leader": 0, "neutral": 0}
+    infos[AGENTS[1]]["fault_log"] = {"follower": 0, "leader": 0, "neutral": 0}
+    infos[AGENTS[0]]["cumulative_distance"] = 200.0
+    infos[AGENTS[1]]["cumulative_distance"] = 100.0
+
+    race_pos = {a: infos[a]["cumulative_distance"] + infos[a]["start_offset"] for a in AGENTS}
+    leader = max(AGENTS, key=lambda a: race_pos[a])
+    follower = AGENTS[1] if leader == AGENTS[0] else AGENTS[0]
+
+    old_total = (
+        infos[follower]["fault_log"]["follower"]
+        + infos[leader]["fault_log"]["leader"]
+        + infos[AGENTS[0]]["fault_log"]["neutral"]
+    )
+    assert old_total < infos[AGENTS[0]]["collision_count"]
+
+    counts = aggregate_fault_counts(infos)
+    assert counts["follower"] + counts["leader"] + counts["neutral"] == infos[AGENTS[0]]["collision_count"]
+
+
+def test_spawn_offset_configurable_and_no_overlap_step0_step1():
+    from src.env.multi_racing_env import MultiRacingEnv, AGENTS, DEFAULT_SPAWN_OFFSET_IDX, CAR_HALF_LEN
+    from src.env.car import CAR_HALF_WIDTH
+    from src.env.collision import obb_overlap
+
+    env = MultiRacingEnv()
+    assert env.spawn_offset_idx == DEFAULT_SPAWN_OFFSET_IDX
+
+    custom_env = MultiRacingEnv(spawn_offset_idx=20)
+    assert custom_env.spawn_offset_idx == 20
+
+    for seed in range(200):
+        obs, _ = env.reset(seed=seed)
+        s0 = env._state[AGENTS[0]]
+        s1 = env._state[AGENTS[1]]
+        ov, _, _ = obb_overlap(
+            s0["pos"], s0["heading"],
+            s1["pos"], s1["heading"],
+            CAR_HALF_LEN, CAR_HALF_WIDTH,
+        )
+        assert not ov, f"Step 0 overlap on seed {seed}"
+
+        _, _, _, _, infos = env.step({a: np.zeros(2) for a in AGENTS})
+        assert not infos[AGENTS[0]]["collision"], f"Step 1 collision on seed {seed}"
+        assert not infos[AGENTS[1]]["collision"], f"Step 1 collision on seed {seed}"
+
+
+def test_respawn_does_not_overlap_opponent():
+    from src.env.multi_racing_env import MultiRacingEnv, AGENTS, CAR_HALF_LEN
+    from src.env.car import CAR_HALF_WIDTH
+    from src.env.collision import obb_overlap
+
+    env = MultiRacingEnv()
+    env.reset(seed=0)
+
+    idx = 100
+    env._state[AGENTS[1]]["pos"][:] = env.track.centerline[idx + 8]
+    env._state[AGENTS[1]]["heading"] = float(
+        np.arctan2(env.track.tangents[idx + 8, 1], env.track.tangents[idx + 8, 0])
+    )
+    env._state[AGENTS[0]]["pos"][:] = env.track.centerline[idx] + env.track.normals[idx] * 50.0
+
+    env._respawn(AGENTS[0])
+
+    s0 = env._state[AGENTS[0]]
+    s1 = env._state[AGENTS[1]]
+    ov, _, _ = obb_overlap(s0["pos"], s0["heading"], s1["pos"], s1["heading"], CAR_HALF_LEN, CAR_HALF_WIDTH)
+    assert not ov
+
+
+def test_respawn_flag_per_step():
+    from src.env.multi_racing_env import MultiRacingEnv, AGENTS
+
+    env = MultiRacingEnv()
+    _, infos = env.reset(seed=0)
+    assert infos[AGENTS[0]]["respawn"] is False
+    assert infos[AGENTS[1]]["respawn"] is False
+
+    _, _, _, _, infos = env.step({a: np.array([0.0, 0.5]) for a in AGENTS})
+    assert infos[AGENTS[0]]["respawn"] is False
+    assert infos[AGENTS[1]]["respawn"] is False
+
+    env._state[AGENTS[0]]["pos"][:] = np.array([9999.0, 9999.0])
+    _, _, _, _, infos = env.step({a: np.array([0.0, 0.0]) for a in AGENTS})
+    assert infos[AGENTS[0]]["respawn"] is True
+    assert infos[AGENTS[1]]["respawn"] is False
+
+    _, _, _, _, infos = env.step({a: np.array([0.0, 0.0]) for a in AGENTS})
+    assert infos[AGENTS[0]]["respawn"] is False
+    assert infos[AGENTS[1]]["respawn"] is False
+
+
+def test_vec_env_deterministic_resets_with_base_seed():
+    v1 = TwoCarVecEnv(seed=42)
+    v2 = TwoCarVecEnv(seed=42)
+
+    obs1 = v1.reset()
+    obs2 = v2.reset()
+    np.testing.assert_array_equal(obs1, obs2)
+
+    v1.env._step_count = 1999
+    v2.env._step_count = 1999
+    acts = np.zeros((2, 2), dtype=np.float32)
+    obs1_next, _, dones1, _ = v1.step(acts)
+    obs2_next, _, dones2, _ = v2.step(acts)
+    assert dones1.all()
+    assert dones2.all()
+    np.testing.assert_array_equal(obs1_next, obs2_next)
+
+
+
+
+
