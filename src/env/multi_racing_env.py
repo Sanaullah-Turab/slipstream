@@ -340,6 +340,38 @@ class MultiRacingEnv(ParallelEnv):
             "gap_to_leader_seconds": s.get("gap_to_leader_seconds", 0.0),
         }
 
+    def _compute_tactical_rewards(self) -> dict[str, float]:
+        rewards = {AGENTS[0]: 0.0, AGENTS[1]: 0.0}
+        s0, s1 = self._state[AGENTS[0]], self._state[AGENTS[1]]
+        race_pos_0 = s0["cumulative_distance"] + s0["start_offset"]
+        race_pos_1 = s1["cumulative_distance"] + s1["start_offset"]
+
+        if race_pos_0 >= race_pos_1:
+            lead_ag, foll_ag = AGENTS[0], AGENTS[1]
+        else:
+            lead_ag, foll_ag = AGENTS[1], AGENTS[0]
+
+        lead_s, foll_s = self._state[lead_ag], self._state[foll_ag]
+        lead_ts = self.track.get_track_state(lead_s["pos"])
+        gap_sec = foll_s.get("gap_to_leader_seconds", 0.0)
+
+        lead_curv = getattr(lead_ts, "curvature", 0.0)
+        if gap_sec < 1.5 and abs(lead_curv) > 0.001:
+            inside_dir = 1.0 if lead_curv > 0.0 else -1.0
+            if lead_s["lateral"] * inside_dir > 2.0:
+                rewards[lead_ag] += 0.08 * min(abs(lead_s["lateral"]) / (self.track.half_width * 0.5), 1.0)
+
+        fwd_lead = np.array([math.cos(lead_s["heading"]), math.sin(lead_s["heading"])])
+        lat_lead = np.array([-fwd_lead[1], fwd_lead[0]])
+        delta = foll_s["pos"] - lead_s["pos"]
+        d_long = -float(np.dot(delta, fwd_lead))
+        d_lat = abs(float(np.dot(delta, lat_lead)))
+
+        if 0.0 < d_long < 45.0 and gap_sec < 1.0 and 8.0 < d_lat <= 22.0:
+            rewards[foll_ag] += 0.10 * min((d_lat - 8.0) / 6.0, 1.0)
+
+        return rewards
+
     def step(self, actions: dict[str, np.ndarray]):
         rewards = {}
         terminations = {a: False for a in self.agents}
@@ -558,11 +590,15 @@ class MultiRacingEnv(ParallelEnv):
                 self._current_leader = AGENTS[1]
                 if not recent_respawn:
                     self._position_swaps += 1
+                    if not self._state[AGENTS[1]]["prev_colliding"]:
+                        rewards[AGENTS[1]] += 1.5
         else:
             if race_pos_0 - race_pos_1 >= car_len:
                 self._current_leader = AGENTS[0]
                 if not recent_respawn:
                     self._position_swaps += 1
+                    if not self._state[AGENTS[0]]["prev_colliding"]:
+                        rewards[AGENTS[0]] += 1.5
 
         if self.enable_position_reward:
             r_pos_0 = compute_positional_reward(race_pos_0, race_pos_1, self.position_k, self.position_g0)
@@ -579,6 +615,10 @@ class MultiRacingEnv(ParallelEnv):
         gap_sec = float(gap_dist / max(follower_spd, 15.0)) if gap_dist > 0.05 else 0.0
         self._state[leader_ag]["gap_to_leader_seconds"] = 0.0
         self._state[follower_ag]["gap_to_leader_seconds"] = gap_sec
+
+        tac_rewards = self._compute_tactical_rewards()
+        for a in AGENTS:
+            rewards[a] += tac_rewards[a]
 
         truncated = self._step_count >= MAX_STEPS
 

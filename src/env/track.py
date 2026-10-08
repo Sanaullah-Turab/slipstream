@@ -176,6 +176,7 @@ class TrackState(NamedTuple):
     track_heading: float
     on_track: bool
     arc_length: float
+    curvature: float = 0.0
 
 
 class Track:
@@ -199,10 +200,12 @@ class Track:
         u = np.linspace(0, 1, self.n_samples, endpoint=False)
         cx, cy = splev(u, tck)
         dx, dy = splev(u, tck, der=1)
+        ddx, ddy = splev(u, tck, der=2)
 
         mag = np.hypot(dx, dy)
         tx, ty = dx / mag, dy / mag
         nx, ny = -ty, tx
+        kappa = (dx * ddy - dy * ddx) / (mag ** 3 + 1e-9)
 
         cl = np.column_stack([cx, cy])
         tang = np.column_stack([tx, ty])
@@ -212,6 +215,7 @@ class Track:
         self.centerline: np.ndarray = cl
         self.tangents: np.ndarray = tang
         self.normals: np.ndarray = norm
+        self.curvatures: np.ndarray = kappa
         self.inner: np.ndarray = cl + norm * hw
         self.outer: np.ndarray = cl - norm * hw
 
@@ -239,7 +243,8 @@ class Track:
         progress = (arc % self.total_length) / self.total_length
         heading = float(np.arctan2(self.tangents[idx, 1], self.tangents[idx, 0]))
         on_track = abs(lateral) <= self.half_width
-        return TrackState(progress, lateral, heading, on_track, arc)
+        curv = float(self.curvatures[idx])
+        return TrackState(progress, lateral, heading, on_track, arc, curv)
 
     def get_starting_grid(self) -> dict[str, tuple[np.ndarray, float]]:
         idx_p1 = int(len(self.centerline) * 0.985)
