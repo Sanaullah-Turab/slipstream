@@ -3,8 +3,24 @@ from __future__ import annotations
 import math
 from typing import NamedTuple
 
+from .track import SHANGHAI_TRACK_WIDTH
+
 DT = 0.05
-CAR_HALF_WIDTH = 5.5
+CAR_WIDTH = 0.14 * SHANGHAI_TRACK_WIDTH
+CAR_LENGTH = 0.39 * SHANGHAI_TRACK_WIDTH
+CAR_HALF_WIDTH = CAR_WIDTH / 2.0
+CAR_HALF_LEN = CAR_LENGTH / 2.0
+WHEELBASE = 0.24 * SHANGHAI_TRACK_WIDTH
+GRID_SLOT_SPACING = 0.57 * SHANGHAI_TRACK_WIDTH
+GRID_COL_OFFSET = 0.22 * SHANGHAI_TRACK_WIDTH
+KERB_WIDTH = 0.07 * SHANGHAI_TRACK_WIDTH
+
+DRAFT_CONE_LENGTH = 3.41 * SHANGHAI_TRACK_WIDTH
+DRAFT_CONE_HALF_ANGLE = 0.26
+DRAFT_MIN_GAP = 0.68 * SHANGHAI_TRACK_WIDTH
+DRAFT_PEAK_GAP = 1.02 * SHANGHAI_TRACK_WIDTH
+DRAFT_DRAG_REDUCTION = 0.8
+DRAFT_SPEED_BOOST = 35.0
 
 
 class CarState(NamedTuple):
@@ -19,20 +35,13 @@ class CarParams(NamedTuple):
     max_speed: float = 150.0
     drag: float = 0.003
     rolling: float = 0.1
-    wheelbase: float = 20.0
+    wheelbase: float = WHEELBASE
     max_steer: float = 0.5
     steer_damp: float = 0.7
 
 
 DEFAULT_PARAMS = CarParams()
 MAX_SPEED = DEFAULT_PARAMS.max_speed
-
-DRAFT_CONE_LENGTH = 150.0
-DRAFT_CONE_HALF_ANGLE = 0.26
-DRAFT_MIN_GAP = 30.0
-DRAFT_PEAK_GAP = 45.0
-DRAFT_DRAG_REDUCTION = 0.8
-DRAFT_SPEED_BOOST = 35.0
 
 
 def step_physics(
@@ -69,4 +78,3 @@ def step_physics(
         ),
         heading_rate,
     )
-

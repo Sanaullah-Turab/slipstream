@@ -31,13 +31,13 @@ def test_render_executes_multiple_steps_without_error():
 
 
 def test_render_chassis_matches_physical_obb_constants():
-    from src.env.track import TRACK_WIDTH
-    assert CAR_HALF_LEN == 13.0
-    assert CAR_HALF_WIDTH == 5.5
+    from src.env.track import TRACK_WIDTH, SHANGHAI_TRACK_WIDTH
+    assert CAR_HALF_LEN == pytest.approx(0.39 * SHANGHAI_TRACK_WIDTH / 2.0)
+    assert CAR_HALF_WIDTH == pytest.approx(0.14 * SHANGHAI_TRACK_WIDTH / 2.0)
     total_len = 2.0 * CAR_HALF_LEN
     total_width = 2.0 * CAR_HALF_WIDTH
-    assert total_len == 26.0
-    assert total_width == 11.0
+    assert total_len == pytest.approx(0.39 * SHANGHAI_TRACK_WIDTH)
+    assert total_width == pytest.approx(0.14 * SHANGHAI_TRACK_WIDTH)
     assert TRACK_WIDTH == 70.0
 
 

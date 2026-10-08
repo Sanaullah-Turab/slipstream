@@ -7,13 +7,19 @@ import numpy as np
 from pettingzoo import ParallelEnv
 from gymnasium import spaces
 
-from .track import Track
+from .track import Track, SHANGHAI_TRACK_WIDTH
 from .car import (
     CarState,
     DEFAULT_PARAMS,
     DT,
     MAX_SPEED,
     CAR_HALF_WIDTH,
+    CAR_HALF_LEN,
+    CAR_LENGTH,
+    CAR_WIDTH,
+    GRID_SLOT_SPACING,
+    GRID_COL_OFFSET,
+    KERB_WIDTH,
     step_physics,
     DRAFT_CONE_LENGTH,
     DRAFT_CONE_HALF_ANGLE,
@@ -35,10 +41,9 @@ from .rewards import (
 from .collision import obb_overlap, resolve_collision, classify_contact, resolve_penetration
 
 AGENTS = ["agent_0", "agent_1"]
-DEFAULT_SPAWN_OFFSET_IDX = 15
+DEFAULT_SPAWN_OFFSET_IDX = max(1, int(round(GRID_SLOT_SPACING / 2.0)))
 SPAWN_OFFSET_IDX = DEFAULT_SPAWN_OFFSET_IDX
 MAX_OPP_DIST = 300.0
-CAR_HALF_LEN = 13.0
 LATERAL_HISTORY_LEN = 20
 
 POSITION_K = DEFAULT_POSITION_K
@@ -65,17 +70,19 @@ def compute_draft_intensity(
     d_long = -float(np.dot(delta, fwd))
     d_lat = abs(float(np.dot(delta, lat_vec)))
 
-    if d_long <= 0.0 or d_long > cone_length or d_lat >= 22.0:
+    max_lat = 0.5 * SHANGHAI_TRACK_WIDTH
+    core_lat = (14.0 / 44.0) * SHANGHAI_TRACK_WIDTH
+    if d_long <= 0.0 or d_long > cone_length or d_lat >= max_lat:
         return 0.0
 
     car_width = 2.0 * CAR_HALF_WIDTH
     if d_lat < car_width and d_long <= min_gap:
         return 0.0
 
-    if d_lat <= 14.0:
-        fade_lat = 1.0 - 0.2 * (d_lat / 14.0)
+    if d_lat <= core_lat:
+        fade_lat = 1.0 - 0.2 * (d_lat / core_lat)
     else:
-        fade_lat = 0.8 * (22.0 - d_lat) / 8.0
+        fade_lat = 0.8 * (max_lat - d_lat) / (max_lat - core_lat)
 
     if d_lat < car_width:
         if d_long <= peak_gap:

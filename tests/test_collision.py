@@ -269,7 +269,7 @@ def test_env_rear_end_classification_symmetry():
     env_a._state[AGENTS[0]]["speed"] = 100.0
     env_a._state[AGENTS[0]]["cumulative_distance"] = 500.0
 
-    env_a._state[AGENTS[1]]["pos"][:] = center - fwd * 20.0
+    env_a._state[AGENTS[1]]["pos"][:] = center - fwd * 14.0
     env_a._state[AGENTS[1]]["heading"] = heading
     env_a._state[AGENTS[1]]["speed"] = 140.0
     env_a._state[AGENTS[1]]["cumulative_distance"] = 480.0
@@ -285,7 +285,7 @@ def test_env_rear_end_classification_symmetry():
     env_b._state[AGENTS[1]]["speed"] = 100.0
     env_b._state[AGENTS[1]]["cumulative_distance"] = 500.0
 
-    env_b._state[AGENTS[0]]["pos"][:] = center - fwd * 20.0
+    env_b._state[AGENTS[0]]["pos"][:] = center - fwd * 14.0
     env_b._state[AGENTS[0]]["heading"] = heading
     env_b._state[AGENTS[0]]["speed"] = 140.0
     env_b._state[AGENTS[0]]["cumulative_distance"] = 480.0
