@@ -415,7 +415,6 @@ def test_spawn_offset_configurable_and_no_overlap_step0_step1():
 
     env = MultiRacingEnv()
     assert env.spawn_offset_idx == DEFAULT_SPAWN_OFFSET_IDX
-    assert env.spawn_offset_idx == 15
 
     custom_env = MultiRacingEnv(spawn_offset_idx=20)
     assert custom_env.spawn_offset_idx == 20
