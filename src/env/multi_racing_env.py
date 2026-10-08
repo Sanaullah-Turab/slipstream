@@ -181,6 +181,8 @@ class MultiRacingEnv(ParallelEnv):
         self._prev_rear_axle_s = {a: None for a in AGENTS}
         self._static_hud_surface = None
         self._text_cache = {}
+        from src.viewer.interpolator import StateInterpolator
+        self._interpolator = StateInterpolator(step_subdivisions=3)
 
     def _compute_transform(self) -> None:
         min_x = float(np.min(self.track.outer[:, 0])) - 25.0
@@ -435,6 +437,9 @@ class MultiRacingEnv(ParallelEnv):
         race_pos_0 = self._state[AGENTS[0]]["start_offset"]
         race_pos_1 = self._state[AGENTS[1]]["start_offset"]
         self._current_leader = AGENTS[0] if race_pos_0 >= race_pos_1 else AGENTS[1]
+
+        if getattr(self, "_interpolator", None) is not None:
+            self._interpolator.reset(self._state)
 
         obs = {a: self._build_obs(a) for a in self.agents}
         info = {a: self._build_info(a) for a in self.agents}
@@ -820,6 +825,9 @@ class MultiRacingEnv(ParallelEnv):
             truncations[agent] = truncated
             infos[agent] = self._build_info(agent)
 
+        if getattr(self, "_interpolator", None) is not None:
+            self._interpolator.on_sim_step(self._state)
+
         if truncated:
             self.agents = []
 
@@ -944,9 +952,16 @@ class MultiRacingEnv(ParallelEnv):
         if self._prev_rear_axle_s is None:
             self._prev_rear_axle_s = {a: None for a in AGENTS}
 
+        interp_states = {}
+        for a in AGENTS:
+            if getattr(self, "_interpolator", None) is not None and a in getattr(self._interpolator, "curr_states", {}):
+                interp_states[a] = self._interpolator.get_interpolated_state(a)
+            else:
+                interp_states[a] = self._state[a]
+
         for agent in AGENTS:
-            s = self._state[agent]
-            pos, heading = s["pos"], s["heading"]
+            ist = interp_states[agent]
+            pos, heading = ist["pos"], ist["heading"]
             fwd = np.array([math.cos(heading), math.sin(heading)])
             rear_axle = pos - fwd * (WHEELBASE * 0.5)
             rear_axle_s = self._world_to_screen(rear_axle)
@@ -960,7 +975,7 @@ class MultiRacingEnv(ParallelEnv):
         surf.blit(self._track_surface, (0, 0))
 
         for agent in AGENTS:
-            pos_s = self._world_to_screen(self._state[agent]["pos"])
+            pos_s = self._world_to_screen(interp_states[agent]["pos"])
             pt = (int(round(pos_s[0])), int(round(pos_s[1])))
             trail = self._car_trails[agent]
             trail.append(pt)
@@ -974,7 +989,7 @@ class MultiRacingEnv(ParallelEnv):
         draft_1 = self._state["agent_1"].get("draft_intensity", 0.0)
         if draft_0 > 0.0 or draft_1 > 0.0:
             lead_ag = "agent_1" if draft_0 > draft_1 else "agent_0"
-            lead_s = self._state[lead_ag]
+            lead_s = interp_states[lead_ag]
             l_pos, l_head = lead_s["pos"], lead_s["heading"]
             fwd = np.array([math.cos(l_head), math.sin(l_head)])
             lat_vec = np.array([-fwd[1], fwd[0]])
@@ -1021,8 +1036,8 @@ class MultiRacingEnv(ParallelEnv):
 
         scale = self._scale
         for agent in AGENTS:
-            s = self._state[agent]
-            pos, heading = s["pos"], s["heading"]
+            ist = interp_states[agent]
+            pos, heading = ist["pos"], ist["heading"]
             pos_s = self._world_to_screen(pos)
             cfg = team_configs[agent]
 
@@ -1148,6 +1163,9 @@ class MultiRacingEnv(ParallelEnv):
 
         steps_contact = self._state[AGENTS[0]]["steps_in_contact"]
         surf.blit(self._render_text(f"Contact Steps:   {steps_contact} steps", "num", (210, 225, 245)), (SIDEBAR_X + 28, 566))
+
+        if getattr(self, "_interpolator", None) is not None:
+            self._interpolator.advance_frame()
 
         if self.render_mode == "human":
             pygame.event.pump()

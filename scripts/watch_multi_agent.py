@@ -22,9 +22,15 @@ def build_parser():
     )
     parser.add_argument(
         "--size",
-        default="1600x900",
-        choices=["1600x900", "1920x1080"],
-        help="Window resolution (1600x900 or 1920x1080).",
+        default="1280x720",
+        choices=["1280x720", "1920x1080"],
+        help="Window resolution (1280x720 or 1920x1080).",
+    )
+    parser.add_argument(
+        "--fps",
+        type=int,
+        default=60,
+        help="Render frames per second (default 60).",
     )
     return parser
 
@@ -39,6 +45,11 @@ def main():
     obs_dict, _ = env.reset()
     env.render()
 
+    clock = pygame.time.Clock()
+    frame_idx = 0
+    step_subdiv = 3 if args.fps == 60 else 1
+    actions = {}
+
     running = True
     try:
         while running:
@@ -52,24 +63,30 @@ def main():
                         break
                     elif event.key == pygame.K_r:
                         obs_dict, _ = env.reset()
+                        frame_idx = 0
                         env.render()
 
             if not running:
                 break
 
-            actions = {}
-            for agent in AGENTS:
-                action, _ = model.predict(obs_dict[agent], deterministic=not args.stochastic)
-                actions[agent] = action
-
-            obs_dict, _, terms, truncs, infos = env.step(actions)
-
-            if any(truncs.values()):
+            if frame_idx % step_subdiv == 0:
                 for agent in AGENTS:
-                    info = infos[agent]
-                    print(f"{agent}: laps={info['laps']}  collisions={info['collision_count']}")
-                obs_dict, _ = env.reset()
-                env.render()
+                    action, _ = model.predict(obs_dict[agent], deterministic=not args.stochastic)
+                    actions[agent] = action
+
+                obs_dict, _, terms, truncs, infos = env.step(actions)
+
+                if any(truncs.values()):
+                    for agent in AGENTS:
+                        info = infos[agent]
+                        print(f"{agent}: laps={info['laps']}  collisions={info['collision_count']}")
+                    obs_dict, _ = env.reset()
+                    frame_idx = 0
+
+            env.render()
+            clock.tick(args.fps)
+            frame_idx += 1
+
     except KeyboardInterrupt:
         pass
     finally:
