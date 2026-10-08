@@ -179,6 +179,8 @@ class MultiRacingEnv(ParallelEnv):
         self._car_rot_cache = None
         self._car_trails = {a: collections.deque(maxlen=20) for a in AGENTS}
         self._prev_rear_axle_s = {a: None for a in AGENTS}
+        self._static_hud_surface = None
+        self._text_cache = {}
 
     def _compute_transform(self) -> None:
         min_x = float(np.min(self.track.outer[:, 0])) - 25.0
@@ -287,6 +289,51 @@ class MultiRacingEnv(ParallelEnv):
         if deg not in cache:
             cache[deg] = pygame.transform.rotate(self._car_sprites_base[agent], -deg)
         return cache[deg]
+
+    def _render_text(self, text: str, font_name: str, color: tuple[int, int, int]):
+        key = (text, font_name, color)
+        surf = self._text_cache.get(key)
+        if surf is None:
+            if len(self._text_cache) > 2000:
+                self._text_cache.clear()
+            surf = self._fonts[font_name].render(text, True, color)
+            self._text_cache[key] = surf
+        return surf
+
+    def _build_static_hud(self, W: int, H: int, sidebar_w: int):
+        import pygame
+        surf = pygame.Surface((sidebar_w, H))
+        surf.fill((14, 17, 24))
+        pygame.draw.line(surf, (36, 44, 60), (0, 0), (0, H), 2)
+
+        pygame.draw.rect(surf, (220, 20, 35), (16, 14, 34, 22), border_radius=4)
+        surf.blit(self._fonts["f1"].render("F1", True, (255, 255, 255)), (24, 16))
+        surf.blit(self._fonts["title"].render("GRAND PRIX", True, (255, 255, 255)), (58, 14))
+        surf.blit(self._fonts["sub"].render("SHANGHAI INTERNATIONAL CIRCUIT", True, (135, 155, 185)), (58, 34))
+
+        for s_idx, (s_label, s_color) in enumerate((("S1", (220, 40, 40)), ("S2", (40, 200, 220)), ("S3", (240, 210, 40))), start=1):
+            bx = 224 + (s_idx - 1) * 26
+            pygame.draw.rect(surf, s_color, (bx, 17, 24, 16), border_radius=2)
+            t_col = (10, 10, 15) if s_idx != 1 else (255, 255, 255)
+            surf.blit(self._fonts["badge"].render(s_label, True, t_col), (bx + 4, 18))
+
+        pygame.draw.rect(surf, (20, 25, 36), (16, 404, sidebar_w - 32, 108), border_radius=8)
+        pygame.draw.rect(surf, (40, 50, 70), (16, 404, sidebar_w - 32, 108), 1, border_radius=8)
+        surf.blit(self._fonts["body"].render("RACE CONTROL & TELEMETRY", True, (180, 205, 235)), (28, 414))
+
+        pygame.draw.rect(surf, (20, 25, 36), (16, 520, sidebar_w - 32, 80), border_radius=8)
+        pygame.draw.rect(surf, (40, 50, 70), (16, 520, sidebar_w - 32, 80), 1, border_radius=8)
+
+        pygame.draw.rect(surf, (16, 22, 32), (16, 608, sidebar_w - 32, 98), border_radius=8)
+        surf.blit(self._fonts["body"].render("CONTROLS & SHORTCUTS:", True, (160, 185, 215)), (26, 618))
+        surf.blit(self._fonts["num"].render("ESC / Q : Exit viewer", True, (210, 220, 235)), (26, 638))
+        surf.blit(self._fonts["num"].render("R       : Restart race grid", True, (210, 220, 235)), (26, 658))
+        surf.blit(self._fonts["sub"].render(f"{W}x{H} DISPLAY | 30 FPS LOCK", True, (130, 150, 175)), (26, 678))
+
+        try:
+            return surf.convert()
+        except Exception:
+            return surf
 
     def observation_space(self, agent: str) -> spaces.Space:
         return self.observation_spaces[agent]
@@ -1040,6 +1087,9 @@ class MultiRacingEnv(ParallelEnv):
                 "f1": pygame.font.SysFont(font_family, 14, bold=True),
             }
 
+        if self._static_hud_surface is None:
+            self._static_hud_surface = self._build_static_hud(W, H, SIDEBAR_W)
+
         if self._car_trails is None:
             self._car_trails = {a: collections.deque(maxlen=20) for a in AGENTS}
         if self._prev_rear_axle_s is None:
@@ -1159,26 +1209,12 @@ class MultiRacingEnv(ParallelEnv):
                     2,
                 )
 
-        pygame.draw.rect(surf, (14, 17, 24), (SIDEBAR_X, 0, SIDEBAR_W, H))
-        pygame.draw.line(surf, (36, 44, 60), (SIDEBAR_X, 0), (SIDEBAR_X, H), 2)
-
-        font_title = self._fonts["title"]
-        font_sub = self._fonts["sub"]
-        font_body = self._fonts["body"]
-        font_stat = self._fonts["stat"]
-        font_num = self._fonts["num"]
-        font_badge = self._fonts["badge"]
-        font_f1 = self._fonts["f1"]
-
-        pygame.draw.rect(surf, (220, 20, 35), (SIDEBAR_X + 16, 14, 34, 22), border_radius=4)
-        surf.blit(font_f1.render("F1", True, (255, 255, 255)), (SIDEBAR_X + 24, 16))
-        surf.blit(font_title.render("GRAND PRIX", True, (255, 255, 255)), (SIDEBAR_X + 58, 14))
-        surf.blit(font_sub.render("SHANGHAI INTERNATIONAL CIRCUIT", True, (135, 155, 185)), (SIDEBAR_X + 58, 34))
+        surf.blit(self._static_hud_surface, (SIDEBAR_X, 0))
 
         pygame.draw.rect(surf, (22, 28, 40), (SIDEBAR_X + 16, 58, 148, 24), border_radius=5)
-        surf.blit(font_num.render(f"STEP: {self._step_count:04d}", True, (185, 215, 255)), (SIDEBAR_X + 24, 62))
+        surf.blit(self._render_text(f"STEP: {self._step_count:04d}", "num", (185, 215, 255)), (SIDEBAR_X + 24, 62))
         pygame.draw.rect(surf, (22, 28, 40), (SIDEBAR_X + 176, 58, 148, 24), border_radius=5)
-        surf.blit(font_num.render(f"TIME: {self._step_count * DT:5.1f}s", True, (185, 215, 255)), (SIDEBAR_X + 184, 62))
+        surf.blit(self._render_text(f"TIME: {self._step_count * DT:5.1f}s", "num", (185, 215, 255)), (SIDEBAR_X + 184, 62))
 
         score_0 = self._state["agent_0"]["laps"] + self._state["agent_0"]["progress"]
         score_1 = self._state["agent_1"]["laps"] + self._state["agent_1"]["progress"]
@@ -1204,65 +1240,65 @@ class MultiRacingEnv(ParallelEnv):
             pygame.draw.rect(surf, card_border, (SIDEBAR_X + 16, y_card, SIDEBAR_W - 32, 146), 2, border_radius=8)
 
             badge_col = (0, 230, 140) if rank_str == "P1" else (220, 225, 235)
-            surf.blit(font_stat.render(rank_str, True, badge_col), (SIDEBAR_X + 28, y_card + 8))
-            surf.blit(font_body.render(f"{cfg['car_num']}  {cfg['name']}", True, (255, 255, 255)), (SIDEBAR_X + 58, y_card + 9))
+            surf.blit(self._render_text(rank_str, "stat", badge_col), (SIDEBAR_X + 28, y_card + 8))
+            surf.blit(self._render_text(f"{cfg['car_num']}  {cfg['name']}", "body", (255, 255, 255)), (SIDEBAR_X + 58, y_card + 9))
 
             spd = st["speed"]
-            surf.blit(font_stat.render(f"Speed: {spd:5.1f} u/s", True, (240, 245, 255)), (SIDEBAR_X + 28, y_card + 32))
+            surf.blit(self._render_text(f"Speed: {spd:5.1f} u/s", "stat", (240, 245, 255)), (SIDEBAR_X + 28, y_card + 32))
             pygame.draw.rect(surf, (32, 40, 56), (SIDEBAR_X + 28, y_card + 52, 280, 6), border_radius=3)
             bar_w = int(min(max(spd, 0.0) / MAX_SPEED, 1.0) * 280)
             if bar_w > 0:
                 pygame.draw.rect(surf, cfg["detail"], (SIDEBAR_X + 28, y_card + 52, bar_w, 6), border_radius=3)
 
             lap_str = f"Lap: {st['laps']}   Progress: {st['progress'] * 100:4.1f}%"
-            surf.blit(font_num.render(lap_str, True, (210, 225, 245)), (SIDEBAR_X + 28, y_card + 66))
+            surf.blit(self._render_text(lap_str, "num", (210, 225, 245)), (SIDEBAR_X + 28, y_card + 66))
+
+            sec = 1 if st["progress"] < 0.33 else (2 if st["progress"] < 0.67 else 3)
+            for s_idx, (s_label, s_color) in enumerate((("S1", (220, 40, 40)), ("S2", (40, 200, 220)), ("S3", (240, 210, 40))), start=1):
+                bx = SIDEBAR_X + 214 + (s_idx - 1) * 26
+                by = y_card + 66
+                if sec == s_idx:
+                    pygame.draw.rect(surf, s_color, (bx, by, 24, 16), border_radius=3)
+                    t_col = (10, 10, 15) if s_idx != 1 else (255, 255, 255)
+                    surf.blit(self._render_text(s_label, "badge", t_col), (bx + 4, by + 1))
+                else:
+                    pygame.draw.rect(surf, (30, 36, 48), (bx, by, 24, 16), border_radius=3)
+                    surf.blit(self._render_text(s_label, "badge", (120, 135, 155)), (bx + 4, by + 1))
 
             last_t = _fmt(st["last_lap_time"])
             best_t = _fmt(st["best_lap_time"])
-            surf.blit(font_num.render(f"Last: {last_t}   Best: {best_t}", True, (180, 205, 235)), (SIDEBAR_X + 28, y_card + 88))
+            surf.blit(self._render_text(f"Last: {last_t}   Best: {best_t}", "num", (180, 205, 235)), (SIDEBAR_X + 28, y_card + 88))
 
             if rank_str == "P1":
-                surf.blit(font_badge.render("LEADER", True, (0, 230, 140)), (SIDEBAR_X + 28, y_card + 114))
+                surf.blit(self._render_text("LEADER", "badge", (0, 230, 140)), (SIDEBAR_X + 28, y_card + 114))
             else:
                 gap_s = st.get("gap_to_leader_seconds", 0.0)
-                surf.blit(font_num.render(f"INTERVAL: +{gap_s:5.3f}s", True, (255, 215, 100)), (SIDEBAR_X + 28, y_card + 114))
+                surf.blit(self._render_text(f"INTERVAL: +{gap_s:5.3f}s", "num", (255, 215, 100)), (SIDEBAR_X + 28, y_card + 114))
                 if gap_s < 1.0 and gap_s > 0.0:
                     pygame.draw.rect(surf, (15, 60, 30), (SIDEBAR_X + 175, y_card + 110, 115, 20), border_radius=4)
-                    surf.blit(font_badge.render("DRS ENABLED (<1s)", True, (80, 245, 140)), (SIDEBAR_X + 183, y_card + 114))
+                    surf.blit(self._render_text("DRS ENABLED (<1s)", "badge", (80, 245, 140)), (SIDEBAR_X + 183, y_card + 114))
                 else:
                     pygame.draw.rect(surf, (35, 42, 52), (SIDEBAR_X + 175, y_card + 110, 115, 20), border_radius=4)
-                    surf.blit(font_badge.render("DRS DISABLED", True, (160, 175, 195)), (SIDEBAR_X + 191, y_card + 114))
+                    surf.blit(self._render_text("DRS DISABLED", "badge", (160, 175, 195)), (SIDEBAR_X + 191, y_card + 114))
 
             y_card += 156
 
-        pygame.draw.rect(surf, (20, 25, 36), (SIDEBAR_X + 16, 404, SIDEBAR_W - 32, 108), border_radius=8)
-        pygame.draw.rect(surf, (40, 50, 70), (SIDEBAR_X + 16, 404, SIDEBAR_W - 32, 108), 1, border_radius=8)
-        surf.blit(font_body.render("RACE CONTROL & TELEMETRY", True, (180, 205, 235)), (SIDEBAR_X + 28, 414))
-
         gap_sec_disp = self._state[p2_ag].get("gap_to_leader_seconds", 0.0)
         dist_between = float(np.linalg.norm(self._state[p1_ag]["pos"] - self._state[p2_ag]["pos"]))
-        surf.blit(font_num.render(f"Gap (Time):     +{gap_sec_disp:5.3f} s", True, (225, 235, 250)), (SIDEBAR_X + 28, 436))
-        surf.blit(font_num.render(f"Gap (Distance):  {dist_between:5.1f} u", True, (225, 235, 250)), (SIDEBAR_X + 28, 456))
-        surf.blit(font_num.render(f"Swaps / Moves:   {self._position_swaps}", True, (225, 235, 250)), (SIDEBAR_X + 28, 476))
+        surf.blit(self._render_text(f"Gap (Time):     +{gap_sec_disp:5.3f} s", "num", (225, 235, 250)), (SIDEBAR_X + 28, 436))
+        surf.blit(self._render_text(f"Gap (Distance):  {dist_between:5.1f} u", "num", (225, 235, 250)), (SIDEBAR_X + 28, 456))
+        surf.blit(self._render_text(f"Swaps / Moves:   {self._position_swaps}", "num", (225, 235, 250)), (SIDEBAR_X + 28, 476))
 
-        pygame.draw.rect(surf, (20, 25, 36), (SIDEBAR_X + 16, 520, SIDEBAR_W - 32, 80), border_radius=8)
-        pygame.draw.rect(surf, (40, 50, 70), (SIDEBAR_X + 16, 520, SIDEBAR_W - 32, 80), 1, border_radius=8)
         is_contact = self._state[AGENTS[0]]["prev_colliding"]
         if is_contact:
             pygame.draw.rect(surf, (75, 20, 25), (SIDEBAR_X + 26, 530, SIDEBAR_W - 52, 24), border_radius=5)
-            surf.blit(font_badge.render("! STEWARDS: CONTACT DETECTED !", True, (255, 90, 90)), (SIDEBAR_X + 46, 535))
+            surf.blit(self._render_text("! STEWARDS: CONTACT DETECTED !", "badge", (255, 90, 90)), (SIDEBAR_X + 46, 535))
         else:
             pygame.draw.rect(surf, (16, 50, 30), (SIDEBAR_X + 26, 530, SIDEBAR_W - 52, 24), border_radius=5)
-            surf.blit(font_badge.render("TRACK CLEAR - GREEN FLAG", True, (80, 235, 140)), (SIDEBAR_X + 66, 535))
+            surf.blit(self._render_text("TRACK CLEAR - GREEN FLAG", "badge", (80, 235, 140)), (SIDEBAR_X + 66, 535))
 
         steps_contact = self._state[AGENTS[0]]["steps_in_contact"]
-        surf.blit(font_num.render(f"Contact Steps:   {steps_contact} steps", True, (210, 225, 245)), (SIDEBAR_X + 28, 566))
-
-        pygame.draw.rect(surf, (16, 22, 32), (SIDEBAR_X + 16, 608, SIDEBAR_W - 32, 98), border_radius=8)
-        surf.blit(font_body.render("CONTROLS & SHORTCUTS:", True, (160, 185, 215)), (SIDEBAR_X + 26, 618))
-        surf.blit(font_num.render("ESC / Q : Exit viewer", True, (210, 220, 235)), (SIDEBAR_X + 26, 638))
-        surf.blit(font_num.render("R       : Restart race grid", True, (210, 220, 235)), (SIDEBAR_X + 26, 658))
-        surf.blit(font_sub.render(f"{W}x{H} DISPLAY | 30 FPS LOCK", True, (130, 150, 175)), (SIDEBAR_X + 26, 678))
+        surf.blit(self._render_text(f"Contact Steps:   {steps_contact} steps", "num", (210, 225, 245)), (SIDEBAR_X + 28, 566))
 
         if self.render_mode == "human":
             pygame.event.pump()
@@ -1285,4 +1321,6 @@ class MultiRacingEnv(ParallelEnv):
         self._car_rot_cache = None
         self._car_trails = None
         self._prev_rear_axle_s = None
+        self._static_hud_surface = None
+        self._text_cache.clear()
 
