@@ -134,6 +134,8 @@ class MultiRacingEnv(ParallelEnv):
         legacy_collision: bool = False,
         spawn_offset_idx: int = DEFAULT_SPAWN_OFFSET_IDX,
         window_size: tuple[int, int] = (1600, 900),
+        fault_penalty: float = 3.5,
+        continuous: bool = False,
     ) -> None:
         super().__init__()
         self.track = Track()
@@ -147,6 +149,8 @@ class MultiRacingEnv(ParallelEnv):
         self.legacy_collision = legacy_collision
         self.spawn_offset_idx = spawn_offset_idx
         self.window_size = window_size
+        self.fault_penalty = fault_penalty
+        self.continuous = continuous or (render_mode == "human")
         self.window_w, self.window_h = window_size
         self.hud_w = 320
         self.track_view_w = self.window_w - self.hud_w
@@ -597,6 +601,17 @@ class MultiRacingEnv(ParallelEnv):
         if 0.0 < d_long < 45.0 and gap_sec < 1.0 and 8.0 < d_lat <= 22.0:
             rewards[foll_ag] += 0.10 * min((d_lat - 8.0) / 6.0, 1.0)
 
+        for a in AGENTS:
+            st = self._state[a]
+            ts = self.track.get_track_state(st["pos"])
+            c_val = getattr(ts, "curvature", 0.0)
+            if abs(c_val) > 0.001:
+                in_dir = 1.0 if c_val > 0.0 else -1.0
+                if st["lateral"] * in_dir > 1.0:
+                    rewards[a] += 0.04 * min(st["lateral"] * in_dir / 10.0, 1.0)
+            else:
+                rewards[a] += 0.03 * max(0.0, 1.0 - abs(st["lateral"]) / 8.0)
+
         return rewards
 
     def step(self, actions: dict[str, np.ndarray]):
@@ -761,8 +776,10 @@ class MultiRacingEnv(ParallelEnv):
                     )
                     if fault == "follower_fault":
                         follower_s["fault_log"]["follower"] += 1
+                        rewards[follower_agent] -= self.fault_penalty
                     elif fault == "leader_fault":
                         leader_s["fault_log"]["leader"] += 1
+                        rewards[leader_agent] -= self.fault_penalty
                     else:
                         leader_s["fault_log"]["neutral"] += 1
                         follower_s["fault_log"]["neutral"] += 1
@@ -848,7 +865,7 @@ class MultiRacingEnv(ParallelEnv):
         for a in AGENTS:
             rewards[a] += tac_rewards[a]
 
-        truncated = self._step_count >= MAX_STEPS
+        truncated = False if self.continuous else (self._step_count >= MAX_STEPS)
 
         for agent in self.agents:
             truncations[agent] = truncated
@@ -1085,7 +1102,7 @@ class MultiRacingEnv(ParallelEnv):
             if self._state[AGENTS[0]]["prev_colliding"]:
                 c_hlen = CAR_HALF_LEN * current_zoom
                 c_hwid = CAR_HALF_WIDTH * current_zoom
-                fwd = np.array([np.cos(heading), np.sin(heading)]) * current_zoom
+                fwd = np.array([np.cos(heading), np.sin(heading)])
                 left = np.array([-fwd[1], fwd[0]])
                 fl = pos_s + fwd * c_hlen + left * c_hwid
                 fr = pos_s + fwd * c_hlen - left * c_hwid

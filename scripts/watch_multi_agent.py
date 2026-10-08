@@ -121,9 +121,6 @@ def main():
                     for agent in AGENTS:
                         info = infos[agent]
                         print(f"{agent}: laps={info['laps']}  collisions={info['collision_count']}")
-                    obs_dict, _ = env.reset()
-                    frame_idx = 0
-                    break
 
             env.render()
             clock.tick(args.fps)

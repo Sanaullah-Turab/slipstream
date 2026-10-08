@@ -55,3 +55,20 @@ def test_clean_overtake_reward_applied():
     obs, rewards, terms, truncs, infos = env.step(actions)
     assert env._current_leader == AGENTS[1]
     assert env._position_swaps >= 1
+
+
+def test_fault_penalty_applied():
+    env = MultiRacingEnv(enable_draft=True, enable_position_reward=True, fault_penalty=3.5)
+    env.reset(seed=42)
+    assert env.fault_penalty == 3.5
+
+
+def test_continuous_viewer_mode_does_not_truncate():
+    env = MultiRacingEnv(continuous=True)
+    env.reset(seed=42)
+    env._step_count = 5000
+    actions = {a: np.array([0.0, 0.5], dtype=np.float32) for a in AGENTS}
+    obs, rewards, terms, truncs, infos = env.step(actions)
+    assert not truncs[AGENTS[0]]
+    assert not truncs[AGENTS[1]]
+    assert len(env.agents) == 2
