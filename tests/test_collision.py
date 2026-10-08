@@ -9,6 +9,7 @@ from src.env.collision import (
     obb_overlap,
     resolve_collision,
     classify_contact,
+    resolve_penetration,
 )
 
 HALF_LEN = 20.0
@@ -268,7 +269,7 @@ def test_env_rear_end_classification_symmetry():
     env_a._state[AGENTS[0]]["speed"] = 100.0
     env_a._state[AGENTS[0]]["cumulative_distance"] = 500.0
 
-    env_a._state[AGENTS[1]]["pos"][:] = center - fwd * 20.0
+    env_a._state[AGENTS[1]]["pos"][:] = center - fwd * 14.0
     env_a._state[AGENTS[1]]["heading"] = heading
     env_a._state[AGENTS[1]]["speed"] = 140.0
     env_a._state[AGENTS[1]]["cumulative_distance"] = 480.0
@@ -284,7 +285,7 @@ def test_env_rear_end_classification_symmetry():
     env_b._state[AGENTS[1]]["speed"] = 100.0
     env_b._state[AGENTS[1]]["cumulative_distance"] = 500.0
 
-    env_b._state[AGENTS[0]]["pos"][:] = center - fwd * 20.0
+    env_b._state[AGENTS[0]]["pos"][:] = center - fwd * 14.0
     env_b._state[AGENTS[0]]["heading"] = heading
     env_b._state[AGENTS[0]]["speed"] = 140.0
     env_b._state[AGENTS[0]]["cumulative_distance"] = 480.0
@@ -294,4 +295,100 @@ def test_env_rear_end_classification_symmetry():
 
     assert fault_a == 1
     assert fault_b == 1
+
+
+def test_resolve_penetration_separates_along_normal():
+    pos_a = np.array([10.0, 0.0])
+    pos_b = np.array([0.0, 0.0])
+    normal = np.array([1.0, 0.0])
+    new_a, new_b = resolve_penetration(pos_a, pos_b, normal, 4.0, epsilon=0.02)
+    assert new_a[0] == pytest.approx(11.99)
+    assert new_b[0] == pytest.approx(-1.99)
+    assert np.linalg.norm(new_a - new_b) == pytest.approx(13.98)
+
+
+def test_resolve_penetration_no_shift_below_epsilon():
+    pos_a = np.array([5.0, 2.0])
+    pos_b = np.array([1.0, 1.0])
+    normal = np.array([1.0, 0.0])
+    new_a, new_b = resolve_penetration(pos_a, pos_b, normal, 0.01, epsilon=0.02)
+    np.testing.assert_array_equal(new_a, pos_a)
+    np.testing.assert_array_equal(new_b, pos_b)
+
+
+def test_resolve_penetration_center_of_mass_conserved():
+    pos_a = np.array([12.3, -4.5])
+    pos_b = np.array([7.1, 8.9])
+    normal = np.array([0.6, 0.8])
+    new_a, new_b = resolve_penetration(pos_a, pos_b, normal, 6.0, epsilon=0.02)
+    np.testing.assert_allclose(0.5 * (new_a + new_b), 0.5 * (pos_a + pos_b))
+
+
+def test_resolve_penetration_reduces_obb_overlap():
+    pos_a = np.array([25.0, 0.0])
+    pos_b = np.array([0.0, 0.0])
+    ov, n, pen = obb_overlap(pos_a, 0.0, pos_b, 0.0, HALF_LEN, HALF_W)
+    assert ov
+    assert pen == pytest.approx(15.0)
+    p0, p1 = resolve_penetration(pos_a, pos_b, n, pen, epsilon=0.02)
+    ov2, _, pen2 = obb_overlap(p0, 0.0, p1, 0.0, HALF_LEN, HALF_W)
+    assert ov2
+    assert pen2 == pytest.approx(0.02, abs=1e-5)
+
+
+def test_env_collision_positional_separation():
+    from src.env.multi_racing_env import MultiRacingEnv, AGENTS, CAR_HALF_LEN, CAR_HALF_WIDTH
+
+    env = MultiRacingEnv(enable_draft=False, enable_position_reward=False)
+    env.reset(seed=42)
+    center = env.track.centerline[10].copy()
+    tang = env.track.tangents[10].copy()
+    heading = float(np.arctan2(tang[1], tang[0]))
+    fwd = np.array([math.cos(heading), math.sin(heading)])
+
+    env._state[AGENTS[0]]["pos"][:] = center
+    env._state[AGENTS[0]]["heading"] = heading
+    env._state[AGENTS[0]]["speed"] = 80.0
+
+    env._state[AGENTS[1]]["pos"][:] = center - fwd * 15.0
+    env._state[AGENTS[1]]["heading"] = heading
+    env._state[AGENTS[1]]["speed"] = 150.0
+
+    actions = {a: np.array([0.0, 1.0], dtype=np.float32) for a in AGENTS}
+    env.step(actions)
+
+    p0 = env._state[AGENTS[0]]["pos"]
+    h0 = env._state[AGENTS[0]]["heading"]
+    p1 = env._state[AGENTS[1]]["pos"]
+    h1 = env._state[AGENTS[1]]["heading"]
+
+    ov, _, pen = obb_overlap(p0, h0, p1, h1, CAR_HALF_LEN, CAR_HALF_WIDTH)
+    if ov:
+        assert pen <= 0.05
+
+
+def test_env_collision_shove_off_track_respawns():
+    from src.env.multi_racing_env import MultiRacingEnv, AGENTS
+
+    env = MultiRacingEnv(enable_draft=False, enable_position_reward=False)
+    env.reset(seed=42)
+    center = env.track.centerline[10].copy()
+    tang = env.track.tangents[10].copy()
+    norm = env.track.normals[10].copy()
+    heading = float(np.arctan2(tang[1], tang[0]))
+
+    half_w = env.track.half_width
+    env._state[AGENTS[0]]["pos"][:] = center + norm * (half_w - 0.5)
+    env._state[AGENTS[0]]["heading"] = heading
+    env._state[AGENTS[0]]["speed"] = 0.0
+
+    env._state[AGENTS[1]]["pos"][:] = center + norm * (half_w - 5.0)
+    env._state[AGENTS[1]]["heading"] = heading
+    env._state[AGENTS[1]]["speed"] = 0.0
+
+    actions = {a: np.array([0.0, 0.0], dtype=np.float32) for a in AGENTS}
+    _, _, _, _, infos = env.step(actions)
+
+    assert infos[AGENTS[0]]["respawn"] or infos[AGENTS[0]]["respawns"] >= 1
+
 
