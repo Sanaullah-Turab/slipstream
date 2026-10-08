@@ -183,6 +183,15 @@ class MultiRacingEnv(ParallelEnv):
         self._text_cache = {}
         from src.viewer.interpolator import StateInterpolator
         self._interpolator = StateInterpolator(step_subdivisions=3)
+        self.view_w = self.window_w
+        self.view_h = self.window_h - int(round(self.window_h * 0.18))
+        from src.viewer.camera import FollowCamera
+        from src.viewer.tile_cache import TileCache
+        self._camera = FollowCamera()
+        self._tile_cache = TileCache(self.track)
+        self._hud = None
+        self._camera_overview = False
+        self._prev_rear_axle_world = {a: None for a in AGENTS}
 
     def _compute_transform(self) -> None:
         min_x = float(np.min(self.track.outer[:, 0])) - 25.0
@@ -208,7 +217,7 @@ class MultiRacingEnv(ParallelEnv):
             self._compute_transform()
         return pt * (self._scale * 2.0) + (self._offset * 2.0)
 
-    def _build_car_sprite(self, agent: str):
+    def _build_car_sprite(self, agent: str, zoom: float | None = None):
         import pygame
         cfg = {
             "agent_0": {
@@ -225,7 +234,7 @@ class MultiRacingEnv(ParallelEnv):
             },
         }[agent]
 
-        scale = self._scale
+        scale = zoom if zoom is not None else (self._scale if self._scale is not None else 1.0)
         c_len_s = CAR_LENGTH * scale
         c_wid_s = CAR_WIDTH * scale
         wb_s = WHEELBASE * scale
@@ -277,19 +286,24 @@ class MultiRacingEnv(ParallelEnv):
         ch_1x = max(2, int(round(ch_4x / 4.0)))
         return pygame.transform.smoothscale(surf_4x, (cw_1x, ch_1x))
 
-    def _get_car_sprite(self, agent: str, heading: float):
+    def _get_car_sprite(self, agent: str, heading: float, zoom: float | None = None):
         import pygame
-        if self._car_sprites_base is None:
-            self._car_sprites_base = {
-                "agent_0": self._build_car_sprite("agent_0"),
-                "agent_1": self._build_car_sprite("agent_1"),
+        z = round(float(zoom if zoom is not None else (self._scale if self._scale is not None else 1.0)), 2)
+        if self._car_rot_cache is None:
+            self._car_rot_cache = {}
+        if z not in self._car_rot_cache:
+            self._car_rot_cache[z] = {
+                "agent_0": {},
+                "agent_1": {},
+                "base_0": self._build_car_sprite("agent_0", z),
+                "base_1": self._build_car_sprite("agent_1", z),
             }
-            self._car_rot_cache = {"agent_0": {}, "agent_1": {}}
 
         deg = int(round(math.degrees(heading) / 3.0)) * 3 % 360
-        cache = self._car_rot_cache[agent]
+        cache = self._car_rot_cache[z][agent]
         if deg not in cache:
-            cache[deg] = pygame.transform.rotate(self._car_sprites_base[agent], -deg)
+            base_surf = self._car_rot_cache[z]["base_0" if agent == "agent_0" else "base_1"]
+            cache[deg] = pygame.transform.rotate(base_surf, -deg)
         return cache[deg]
 
     def _render_text(self, text: str, font_name: str, color: tuple[int, int, int]):
@@ -440,6 +454,14 @@ class MultiRacingEnv(ParallelEnv):
 
         if getattr(self, "_interpolator", None) is not None:
             self._interpolator.reset(self._state)
+
+        if getattr(self, "_camera", None) is not None:
+            spawn_pos = (self._state[AGENTS[0]]["pos"] + self._state[AGENTS[1]]["pos"]) * 0.5
+            self._camera.snap_to(spawn_pos)
+            if getattr(self, "_tile_cache", None) is not None:
+                self._tile_cache.reset_rubber()
+                self._tile_cache.prebake_spawn_ring(spawn_pos, (self.view_w, self.view_h))
+        self._prev_rear_axle_world = {a: None for a in AGENTS}
 
         obs = {a: self._build_obs(a) for a in self.agents}
         info = {a: self._build_info(a) for a in self.agents}
@@ -910,7 +932,6 @@ class MultiRacingEnv(ParallelEnv):
 
         W, H = self.window_w, self.window_h
         SIDEBAR_X = self.track_view_w
-        SIDEBAR_W = self.hud_w
 
         if self._screen is None:
             pygame.init()
@@ -928,29 +949,18 @@ class MultiRacingEnv(ParallelEnv):
                 self._screen = pygame.Surface((W, H))
             self._clock = pygame.time.Clock()
 
+        if self._hud is None:
+            from src.viewer.broadcast_hud import BroadcastHUD
+            self._hud = BroadcastHUD(self.track, (W, H))
+
         if self._track_surface is None:
             self._bake_track_surface(W, H, SIDEBAR_X)
 
         if self._fonts is None:
-            font_family = "ubuntu" if "ubuntu" in pygame.font.get_fonts() else "dejavusans"
-            mono_family = "ubuntumono" if "ubuntumono" in pygame.font.get_fonts() else "monospace"
-            self._fonts = {
-                "title": pygame.font.SysFont(font_family, 17, bold=True),
-                "sub": pygame.font.SysFont(font_family, 11, bold=True),
-                "body": pygame.font.SysFont(font_family, 12, bold=True),
-                "stat": pygame.font.SysFont(font_family, 13, bold=True),
-                "num": pygame.font.SysFont(mono_family, 12, bold=True),
-                "badge": pygame.font.SysFont(font_family, 10, bold=True),
-                "f1": pygame.font.SysFont(font_family, 14, bold=True),
-            }
-
-        if self._static_hud_surface is None:
-            self._static_hud_surface = self._build_static_hud(W, H, SIDEBAR_W)
+            self._fonts = self._hud.fonts
 
         if self._car_trails is None:
             self._car_trails = {a: collections.deque(maxlen=20) for a in AGENTS}
-        if self._prev_rear_axle_s is None:
-            self._prev_rear_axle_s = {a: None for a in AGENTS}
 
         interp_states = {}
         for a in AGENTS:
@@ -959,23 +969,43 @@ class MultiRacingEnv(ParallelEnv):
             else:
                 interp_states[a] = self._state[a]
 
+        surf = self._screen
+        view_w = W
+        view_h = self._hud.view_h
+
+        if not self._camera_overview:
+            current_zoom = self._tile_cache.zoom
+            leader_is_ham = self._current_leader == "agent_1"
+            pos_ham = interp_states["agent_1"]["pos"]
+            pos_ver = interp_states["agent_0"]["pos"]
+            vel_ham = np.array([math.cos(interp_states["agent_1"]["heading"]), math.sin(interp_states["agent_1"]["heading"])]) * interp_states["agent_1"]["speed"]
+            vel_ver = np.array([math.cos(interp_states["agent_0"]["heading"]), math.sin(interp_states["agent_0"]["heading"])]) * interp_states["agent_0"]["speed"]
+            self._camera.update(pos_ham, vel_ham, pos_ver, vel_ver, leader_is_ham, (view_w, view_h), current_zoom, DT / 3.0)
+            leader_s = self._state[self._current_leader]["arc_length"]
+            self._tile_cache.update_frame(self._camera.pos, (view_w, view_h), leader_s)
+            self._tile_cache.render_tiles(surf, self._camera.pos, (view_w, view_h))
+
+            def to_screen(pt: np.ndarray) -> np.ndarray:
+                return self._camera.world_to_screen(pt, (view_w, view_h), current_zoom)
+        else:
+            current_zoom = self._scale
+            surf.blit(self._track_surface, (0, 0))
+
+            def to_screen(pt: np.ndarray) -> np.ndarray:
+                return self._world_to_screen(pt)
+
         for agent in AGENTS:
             ist = interp_states[agent]
             pos, heading = ist["pos"], ist["heading"]
             fwd = np.array([math.cos(heading), math.sin(heading)])
             rear_axle = pos - fwd * (WHEELBASE * 0.5)
-            rear_axle_s = self._world_to_screen(rear_axle)
-            curr_axle = (int(round(rear_axle_s[0])), int(round(rear_axle_s[1])))
-            prev_axle = self._prev_rear_axle_s[agent]
-            if prev_axle is not None and prev_axle != curr_axle:
-                pygame.draw.line(self._track_surface, (16, 17, 19), prev_axle, curr_axle, 2)
-            self._prev_rear_axle_s[agent] = curr_axle
-
-        surf = self._screen
-        surf.blit(self._track_surface, (0, 0))
+            prev_axle = self._prev_rear_axle_world.get(agent)
+            if prev_axle is not None and not np.array_equal(prev_axle, rear_axle):
+                self._tile_cache.add_rubber_segment(prev_axle, rear_axle)
+            self._prev_rear_axle_world[agent] = rear_axle.copy()
 
         for agent in AGENTS:
-            pos_s = self._world_to_screen(interp_states[agent]["pos"])
+            pos_s = to_screen(interp_states[agent]["pos"])
             pt = (int(round(pos_s[0])), int(round(pos_s[1])))
             trail = self._car_trails[agent]
             trail.append(pt)
@@ -983,7 +1013,7 @@ class MultiRacingEnv(ParallelEnv):
             n = len(trail)
             if n >= 2:
                 for i in range(n - 1):
-                    pygame.draw.line(surf, shades[i + (20 - n)], trail[i], trail[i + 1], 1)
+                    pygame.draw.line(surf, shades[i + (20 - n)], trail[i], trail[i + 1], max(1, int(round(current_zoom * 0.5))))
 
         draft_0 = self._state["agent_0"].get("draft_intensity", 0.0)
         draft_1 = self._state["agent_1"].get("draft_intensity", 0.0)
@@ -999,9 +1029,9 @@ class MultiRacingEnv(ParallelEnv):
             cone_end = rear_c - fwd * cone_len
             end_l = cone_end + lat_vec * cone_hw
             end_r = cone_end - lat_vec * cone_hw
-            s_rear = self._world_to_screen(rear_c)
-            s_el = self._world_to_screen(end_l)
-            s_er = self._world_to_screen(end_r)
+            s_rear = to_screen(rear_c)
+            s_el = to_screen(end_l)
+            s_er = to_screen(end_r)
             pygame.draw.aaline(surf, (60, 180, 200), (int(s_rear[0]), int(s_rear[1])), (int(s_el[0]), int(s_el[1])))
             pygame.draw.aaline(surf, (60, 180, 200), (int(s_rear[0]), int(s_rear[1])), (int(s_er[0]), int(s_er[1])))
             phase = (self._step_count * 0.06) % 1.0
@@ -1011,8 +1041,8 @@ class MultiRacingEnv(ParallelEnv):
                 v = v_base * u
                 pt1 = rear_c - fwd * (u * cone_len) + lat_vec * (v * cone_hw)
                 pt2 = pt1 - fwd * s_len
-                sp1 = self._world_to_screen(pt1)
-                sp2 = self._world_to_screen(pt2)
+                sp1 = to_screen(pt1)
+                sp2 = to_screen(pt2)
                 pygame.draw.aaline(surf, (60, 180, 200), (int(sp1[0]), int(sp1[1])), (int(sp2[0]), int(sp2[1])))
 
         team_configs = {
@@ -1034,18 +1064,17 @@ class MultiRacingEnv(ParallelEnv):
             },
         }
 
-        scale = self._scale
         for agent in AGENTS:
             ist = interp_states[agent]
             pos, heading = ist["pos"], ist["heading"]
-            pos_s = self._world_to_screen(pos)
+            pos_s = to_screen(pos)
             cfg = team_configs[agent]
 
             rays = self.track.ray_distances(pos, heading, MAX_RAY_DIST)
             for a, dist in zip(RAY_ANGLES, rays):
                 angle = heading + a
                 end = pos + dist * np.array([np.cos(angle), np.sin(angle)])
-                end_s = self._world_to_screen(end)
+                end_s = to_screen(end)
                 pygame.draw.line(
                     surf, cfg["ray"],
                     (int(pos_s[0]), int(pos_s[1])),
@@ -1054,14 +1083,14 @@ class MultiRacingEnv(ParallelEnv):
                 )
                 pygame.draw.circle(surf, cfg["ray"], (int(end_s[0]), int(end_s[1])), 2)
 
-            car_surf = self._get_car_sprite(agent, heading)
+            car_surf = self._get_car_sprite(agent, heading, current_zoom)
             rect = car_surf.get_rect(center=(int(pos_s[0]), int(pos_s[1])))
             surf.blit(car_surf, rect)
 
             if self._state[AGENTS[0]]["prev_colliding"]:
-                c_hlen = CAR_HALF_LEN * scale
-                c_hwid = CAR_HALF_WIDTH * scale
-                fwd = np.array([np.cos(heading), np.sin(heading)]) * scale
+                c_hlen = CAR_HALF_LEN * current_zoom
+                c_hwid = CAR_HALF_WIDTH * current_zoom
+                fwd = np.array([np.cos(heading), np.sin(heading)]) * current_zoom
                 left = np.array([-fwd[1], fwd[0]])
                 fl = pos_s + fwd * c_hlen + left * c_hwid
                 fr = pos_s + fwd * c_hlen - left * c_hwid
@@ -1073,96 +1102,31 @@ class MultiRacingEnv(ParallelEnv):
                     2,
                 )
 
-        surf.blit(self._static_hud_surface, (SIDEBAR_X, 0))
-
-        pygame.draw.rect(surf, (22, 28, 40), (SIDEBAR_X + 16, 58, 148, 24), border_radius=5)
-        surf.blit(self._render_text(f"STEP: {self._step_count:04d}", "num", (185, 215, 255)), (SIDEBAR_X + 24, 62))
-        pygame.draw.rect(surf, (22, 28, 40), (SIDEBAR_X + 176, 58, 148, 24), border_radius=5)
-        surf.blit(self._render_text(f"TIME: {self._step_count * DT:5.1f}s", "num", (185, 215, 255)), (SIDEBAR_X + 184, 62))
-
-        score_0 = self._state["agent_0"]["laps"] + self._state["agent_0"]["progress"]
-        score_1 = self._state["agent_1"]["laps"] + self._state["agent_1"]["progress"]
-        if score_0 >= score_1:
-            p1_ag, p2_ag = "agent_0", "agent_1"
-        else:
-            p1_ag, p2_ag = "agent_1", "agent_0"
-
-        def _fmt(sec: float | None) -> str:
-            if sec is None:
-                return "--:--.---"
-            m = int(sec // 60)
-            s_rem = sec % 60
-            return f"{m:02d}:{s_rem:06.3f}"
-
-        y_card = 92
-        for rank_str, ag in (("P1", p1_ag), ("P2", p2_ag)):
-            cfg = team_configs[ag]
-            st = self._state[ag]
-            card_border = cfg["primary"] if ag == "agent_0" else cfg["primary"]
-
-            pygame.draw.rect(surf, (20, 25, 36), (SIDEBAR_X + 16, y_card, SIDEBAR_W - 32, 146), border_radius=8)
-            pygame.draw.rect(surf, card_border, (SIDEBAR_X + 16, y_card, SIDEBAR_W - 32, 146), 2, border_radius=8)
-
-            badge_col = (0, 230, 140) if rank_str == "P1" else (220, 225, 235)
-            surf.blit(self._render_text(rank_str, "stat", badge_col), (SIDEBAR_X + 28, y_card + 8))
-            surf.blit(self._render_text(f"{cfg['car_num']}  {cfg['name']}", "body", (255, 255, 255)), (SIDEBAR_X + 58, y_card + 9))
-
-            spd = st["speed"]
-            surf.blit(self._render_text(f"Speed: {spd:5.1f} u/s", "stat", (240, 245, 255)), (SIDEBAR_X + 28, y_card + 32))
-            pygame.draw.rect(surf, (32, 40, 56), (SIDEBAR_X + 28, y_card + 52, 280, 6), border_radius=3)
-            bar_w = int(min(max(spd, 0.0) / MAX_SPEED, 1.0) * 280)
-            if bar_w > 0:
-                pygame.draw.rect(surf, cfg["detail"], (SIDEBAR_X + 28, y_card + 52, bar_w, 6), border_radius=3)
-
-            lap_str = f"Lap: {st['laps']}   Progress: {st['progress'] * 100:4.1f}%"
-            surf.blit(self._render_text(lap_str, "num", (210, 225, 245)), (SIDEBAR_X + 28, y_card + 66))
-
-            sec = 1 if st["progress"] < 0.33 else (2 if st["progress"] < 0.67 else 3)
-            for s_idx, (s_label, s_color) in enumerate((("S1", (220, 40, 40)), ("S2", (40, 200, 220)), ("S3", (240, 210, 40))), start=1):
-                bx = SIDEBAR_X + 214 + (s_idx - 1) * 26
-                by = y_card + 66
-                if sec == s_idx:
-                    pygame.draw.rect(surf, s_color, (bx, by, 24, 16), border_radius=3)
-                    t_col = (10, 10, 15) if s_idx != 1 else (255, 255, 255)
-                    surf.blit(self._render_text(s_label, "badge", t_col), (bx + 4, by + 1))
-                else:
-                    pygame.draw.rect(surf, (30, 36, 48), (bx, by, 24, 16), border_radius=3)
-                    surf.blit(self._render_text(s_label, "badge", (120, 135, 155)), (bx + 4, by + 1))
-
-            last_t = _fmt(st["last_lap_time"])
-            best_t = _fmt(st["best_lap_time"])
-            surf.blit(self._render_text(f"Last: {last_t}   Best: {best_t}", "num", (180, 205, 235)), (SIDEBAR_X + 28, y_card + 88))
-
-            if rank_str == "P1":
-                surf.blit(self._render_text("LEADER", "badge", (0, 230, 140)), (SIDEBAR_X + 28, y_card + 114))
-            else:
-                gap_s = st.get("gap_to_leader_seconds", 0.0)
-                surf.blit(self._render_text(f"INTERVAL: +{gap_s:5.3f}s", "num", (255, 215, 100)), (SIDEBAR_X + 28, y_card + 114))
-                if gap_s < 1.0 and gap_s > 0.0:
-                    pygame.draw.rect(surf, (15, 60, 30), (SIDEBAR_X + 175, y_card + 110, 115, 20), border_radius=4)
-                    surf.blit(self._render_text("DRS ENABLED (<1s)", "badge", (80, 245, 140)), (SIDEBAR_X + 183, y_card + 114))
-                else:
-                    pygame.draw.rect(surf, (35, 42, 52), (SIDEBAR_X + 175, y_card + 110, 115, 20), border_radius=4)
-                    surf.blit(self._render_text("DRS DISABLED", "badge", (160, 175, 195)), (SIDEBAR_X + 191, y_card + 114))
-
-            y_card += 156
-
-        gap_sec_disp = self._state[p2_ag].get("gap_to_leader_seconds", 0.0)
-        dist_between = float(np.linalg.norm(self._state[p1_ag]["pos"] - self._state[p2_ag]["pos"]))
-        surf.blit(self._render_text(f"Gap (Time):     +{gap_sec_disp:5.3f} s", "num", (225, 235, 250)), (SIDEBAR_X + 28, 436))
-        surf.blit(self._render_text(f"Gap (Distance):  {dist_between:5.1f} u", "num", (225, 235, 250)), (SIDEBAR_X + 28, 456))
-        surf.blit(self._render_text(f"Swaps / Moves:   {self._position_swaps}", "num", (225, 235, 250)), (SIDEBAR_X + 28, 476))
-
         is_contact = self._state[AGENTS[0]]["prev_colliding"]
-        if is_contact:
-            pygame.draw.rect(surf, (75, 20, 25), (SIDEBAR_X + 26, 530, SIDEBAR_W - 52, 24), border_radius=5)
-            surf.blit(self._render_text("! STEWARDS: CONTACT DETECTED !", "badge", (255, 90, 90)), (SIDEBAR_X + 46, 535))
-        else:
-            pygame.draw.rect(surf, (16, 50, 30), (SIDEBAR_X + 26, 530, SIDEBAR_W - 52, 24), border_radius=5)
-            surf.blit(self._render_text("TRACK CLEAR - GREEN FLAG", "badge", (80, 235, 140)), (SIDEBAR_X + 66, 535))
+        self._hud.draw_bottom_bar(
+            surf,
+            self._state["agent_1"],
+            self._state["agent_0"],
+            self._current_leader,
+            self._step_count,
+            DT,
+            self._position_swaps,
+            is_contact,
+        )
+        self._hud.draw_top_chips(
+            surf,
+            self._state[self._current_leader]["laps"],
+            self._state[self._current_leader]["progress"],
+            is_contact,
+        )
+        self._hud.draw_minimap(
+            surf,
+            self._state["agent_1"]["pos"],
+            self._state["agent_0"]["pos"],
+        )
 
-        steps_contact = self._state[AGENTS[0]]["steps_in_contact"]
-        surf.blit(self._render_text(f"Contact Steps:   {steps_contact} steps", "num", (210, 225, 245)), (SIDEBAR_X + 28, 566))
+        if self._hud.show_help:
+            surf.blit(self._hud.help_overlay, (self._hud.help_x, self._hud.help_y))
 
         if getattr(self, "_interpolator", None) is not None:
             self._interpolator.advance_frame()
@@ -1184,10 +1148,12 @@ class MultiRacingEnv(ParallelEnv):
         self._track_surface = None
         self._pristine_track_surface = None
         self._fonts = None
+        self._hud = None
         self._car_sprites_base = None
         self._car_rot_cache = None
         self._car_trails = None
         self._prev_rear_axle_s = None
+        self._prev_rear_axle_world = {a: None for a in AGENTS}
         self._static_hud_surface = None
         self._text_cache.clear()
 

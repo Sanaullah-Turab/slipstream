@@ -65,6 +65,9 @@ def main():
                         obs_dict, _ = env.reset()
                         frame_idx = 0
                         env.render()
+                    elif event.key == pygame.K_h:
+                        if getattr(env, "_hud", None) is not None:
+                            env._hud.show_help = not env._hud.show_help
 
             if not running:
                 break
