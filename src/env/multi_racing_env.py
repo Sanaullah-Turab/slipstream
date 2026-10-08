@@ -120,6 +120,7 @@ class MultiRacingEnv(ParallelEnv):
         position_g0: float = DEFAULT_POSITION_G0,
         legacy_collision: bool = False,
         spawn_offset_idx: int = DEFAULT_SPAWN_OFFSET_IDX,
+        window_size: tuple[int, int] = (1600, 900),
     ) -> None:
         super().__init__()
         self.track = Track()
@@ -132,6 +133,13 @@ class MultiRacingEnv(ParallelEnv):
         self.position_g0 = position_g0
         self.legacy_collision = legacy_collision
         self.spawn_offset_idx = spawn_offset_idx
+        self.window_size = window_size
+        self.window_w, self.window_h = window_size
+        self.hud_w = 320
+        self.track_view_w = self.window_w - self.hud_w
+        self.track_view_h = self.window_h
+        self._scale: float | None = None
+        self._offset: np.ndarray | None = None
         self.possible_agents = AGENTS[:]
 
         obs_dim = 15 if legacy_collision else 19
@@ -154,6 +162,25 @@ class MultiRacingEnv(ParallelEnv):
         self._clock = None
         self._track_surface = None
         self._fonts = None
+
+    def _compute_transform(self) -> None:
+        min_x = float(np.min(self.track.outer[:, 0])) - 25.0
+        max_x = float(np.max(self.track.outer[:, 0])) + 25.0
+        min_y = float(np.min(self.track.outer[:, 1])) - 25.0
+        max_y = float(np.max(self.track.outer[:, 1])) + 25.0
+        margin = 40.0
+        avail_w = self.track_view_w - 2.0 * margin
+        avail_h = self.track_view_h - 2.0 * margin
+        scale = min(avail_w / (max_x - min_x), avail_h / (max_y - min_y))
+        off_x = margin + (avail_w - (max_x - min_x) * scale) / 2.0 - min_x * scale
+        off_y = margin + (avail_h - (max_y - min_y) * scale) / 2.0 - min_y * scale
+        self._scale = scale
+        self._offset = np.array([off_x, off_y], dtype=np.float64)
+
+    def _world_to_screen(self, pt: np.ndarray) -> np.ndarray:
+        if self._scale is None:
+            self._compute_transform()
+        return pt * self._scale + self._offset
 
     def observation_space(self, agent: str) -> spaces.Space:
         return self.observation_spaces[agent]
@@ -689,28 +716,32 @@ class MultiRacingEnv(ParallelEnv):
     def _bake_track_surface(self, W: int, H: int, sidebar_x: int) -> None:
         import pygame
 
+        if self._scale is None:
+            self._compute_transform()
+
         surf = pygame.Surface((W, H))
         surf.fill((20, 28, 21))
         for y in range(0, H, 36):
             pygame.draw.rect(surf, (24, 34, 25), (0, y, sidebar_x, 18))
 
-        outer = [(int(x), int(y)) for x, y in self.track.outer]
-        inner = [(int(x), int(y)) for x, y in self.track.inner]
+        scale = self._scale
+        outer = [tuple(self._world_to_screen(p).astype(int)) for p in self.track.outer]
+        inner = [tuple(self._world_to_screen(p).astype(int)) for p in self.track.inner]
 
         for i in range(len(self.track.outer) - 1):
             is_red = (i // 6) % 2 == 0
             c_base = (220, 42, 42) if is_red else (245, 245, 250)
             c_hi = (255, 75, 75) if is_red else (255, 255, 255)
-            p0 = self.track.outer[i]
-            p1 = self.track.outer[i + 1]
-            n0 = self.track.normals[i]
-            n1 = self.track.normals[i + 1]
-            poly = [p0, p1, p1 - n1 * 6.0, p0 - n0 * 6.0]
+            p0 = self._world_to_screen(self.track.outer[i])
+            p1 = self._world_to_screen(self.track.outer[i + 1])
+            n0 = self.track.normals[i] * (6.0 * scale)
+            n1 = self.track.normals[i + 1] * (6.0 * scale)
+            poly = [p0, p1, p1 - n1, p0 - n0]
             pygame.draw.polygon(surf, c_base, [(int(x), int(y)) for x, y in poly])
             pygame.draw.line(
                 surf, c_hi,
-                (int(p0[0] - n0[0] * 5.0), int(p0[1] - n0[1] * 5.0)),
-                (int(p1[0] - n1[0] * 5.0), int(p1[1] - n1[1] * 5.0)),
+                (int(p0[0] - n0[0] * (5.0 / 6.0)), int(p0[1] - n0[1] * (5.0 / 6.0))),
+                (int(p1[0] - n1[0] * (5.0 / 6.0)), int(p1[1] - n1[1] * (5.0 / 6.0))),
                 1,
             )
 
@@ -718,11 +749,13 @@ class MultiRacingEnv(ParallelEnv):
 
         cl = self.track.centerline
         for i in range(len(cl) - 1):
+            p0 = self._world_to_screen(cl[i])
+            p1 = self._world_to_screen(cl[i + 1])
             pygame.draw.line(
                 surf, (25, 27, 31),
-                (int(cl[i, 0]), int(cl[i, 1])),
-                (int(cl[i + 1, 0]), int(cl[i + 1, 1])),
-                16,
+                (int(p0[0]), int(p0[1])),
+                (int(p1[0]), int(p1[1])),
+                max(1, int(round(16 * scale))),
             )
 
         pygame.draw.polygon(surf, (20, 28, 21), inner)
@@ -731,29 +764,21 @@ class MultiRacingEnv(ParallelEnv):
             is_red = (i // 6) % 2 == 0
             c_base = (220, 42, 42) if is_red else (245, 245, 250)
             c_hi = (255, 75, 75) if is_red else (255, 255, 255)
-            p0 = self.track.inner[i]
-            p1 = self.track.inner[i + 1]
-            n0 = self.track.normals[i]
-            n1 = self.track.normals[i + 1]
-            poly = [p0, p1, p1 + n1 * 6.0, p0 + n0 * 6.0]
+            p0 = self._world_to_screen(self.track.inner[i])
+            p1 = self._world_to_screen(self.track.inner[i + 1])
+            n0 = self.track.normals[i] * (6.0 * scale)
+            n1 = self.track.normals[i + 1] * (6.0 * scale)
+            poly = [p0, p1, p1 + n1, p0 + n0]
             pygame.draw.polygon(surf, c_base, [(int(x), int(y)) for x, y in poly])
             pygame.draw.line(
                 surf, c_hi,
-                (int(p0[0] + n0[0] * 5.0), int(p0[1] + n0[1] * 5.0)),
-                (int(p1[0] + n1[0] * 5.0), int(p1[1] + n1[1] * 5.0)),
+                (int(p0[0] + n0[0] * (5.0 / 6.0)), int(p0[1] + n0[1] * (5.0 / 6.0))),
+                (int(p1[0] + n1[0] * (5.0 / 6.0)), int(p1[1] + n1[1] * (5.0 / 6.0))),
                 1,
             )
 
         pygame.draw.lines(surf, (240, 242, 248), True, outer, 2)
         pygame.draw.lines(surf, (240, 242, 248), True, inner, 2)
-
-        for i in range(0, len(cl) - 8, 16):
-            pygame.draw.line(
-                surf, (68, 76, 88),
-                (int(cl[i, 0]), int(cl[i, 1])),
-                (int(cl[i + 8, 0]), int(cl[i + 8, 1])),
-                1,
-            )
 
         p_out = np.array(outer[0], dtype=float)
         p_in = np.array(inner[0], dtype=float)
@@ -763,27 +788,18 @@ class MultiRacingEnv(ParallelEnv):
             pt0 = p_in + (p_out - p_in) * t0
             pt1 = p_in + (p_out - p_in) * t1
             c_chk = (245, 245, 250) if k % 2 == 0 else (25, 25, 25)
-            pygame.draw.line(surf, c_chk, (int(pt0[0]), int(pt0[1])), (int(pt1[0]), int(pt1[1])), 5)
+            pygame.draw.line(surf, c_chk, (int(pt0[0]), int(pt0[1])), (int(pt1[0]), int(pt1[1])), max(1, int(round(5 * scale))))
 
         if hasattr(self.track, "get_starting_grid") and getattr(self.track, "circuit", "") == "shanghai":
             grid = self.track.get_starting_grid()
             for slot_key in ("agent_0", "agent_1"):
                 pos_g, hdg_g = grid[slot_key]
-                f_vec = np.array([np.cos(hdg_g), np.sin(hdg_g)]) * CAR_HALF_LEN
-                s_vec = np.array([-np.sin(hdg_g), np.cos(hdg_g)]) * CAR_HALF_WIDTH
-                box_pts = [pos_g + f_vec + s_vec, pos_g + f_vec - s_vec, pos_g - f_vec - s_vec, pos_g - f_vec + s_vec]
+                pos_s = self._world_to_screen(pos_g)
+                f_vec = np.array([np.cos(hdg_g), np.sin(hdg_g)]) * (CAR_HALF_LEN * scale)
+                s_vec = np.array([-np.sin(hdg_g), np.cos(hdg_g)]) * (CAR_HALF_WIDTH * scale)
+                box_pts = [pos_s + f_vec + s_vec, pos_s + f_vec - s_vec, pos_s - f_vec - s_vec, pos_s - f_vec + s_vec]
                 pygame.draw.polygon(surf, (220, 225, 235), [(int(p[0]), int(p[1])) for p in box_pts], 1)
-                pygame.draw.line(surf, (240, 245, 255), (int((pos_g + f_vec - s_vec)[0]), int((pos_g + f_vec - s_vec)[1])), (int((pos_g + f_vec + s_vec)[0]), int((pos_g + f_vec + s_vec)[1])), 2)
-        else:
-            norm0 = self.track.normals[15]
-            tang0 = self.track.tangents[15]
-            slot1_pos = self.track.centerline[15] - norm0 * 12.0
-            slot2_pos = self.track.centerline[15 - 12] + norm0 * 12.0
-            for slot in (slot1_pos, slot2_pos):
-                f_vec = tang0 * 10.0
-                s_vec = norm0 * 6.0
-                box_pts = [slot + f_vec + s_vec, slot + f_vec - s_vec, slot - f_vec - s_vec, slot - f_vec + s_vec]
-                pygame.draw.polygon(surf, (215, 218, 225), [(int(p[0]), int(p[1])) for p in box_pts], 1)
+                pygame.draw.line(surf, (240, 245, 255), (int((pos_s + f_vec - s_vec)[0]), int((pos_s + f_vec - s_vec)[1])), (int((pos_s + f_vec + s_vec)[0]), int((pos_s + f_vec + s_vec)[1])), 2)
 
         self._track_surface = surf
 
@@ -791,14 +807,21 @@ class MultiRacingEnv(ParallelEnv):
         import pygame
         from .track import RAY_ANGLES
 
-        W, H = 1280, 720
-        SIDEBAR_X = 940
-        SIDEBAR_W = 340
+        W, H = self.window_w, self.window_h
+        SIDEBAR_X = self.track_view_w
+        SIDEBAR_W = self.hud_w
 
         if self._screen is None:
             pygame.init()
             if self.render_mode == "human":
-                self._screen = pygame.display.set_mode((W, H))
+                flags = pygame.DOUBLEBUF | pygame.SCALED
+                try:
+                    self._screen = pygame.display.set_mode((W, H), flags, vsync=1)
+                except Exception:
+                    try:
+                        self._screen = pygame.display.set_mode((W, H), flags)
+                    except Exception:
+                        self._screen = pygame.display.set_mode((W, H))
                 pygame.display.set_caption("Slipstream - Formula 1 Shanghai Grand Prix")
             else:
                 self._screen = pygame.Surface((W, H))
@@ -842,33 +865,38 @@ class MultiRacingEnv(ParallelEnv):
             },
         }
 
+        scale = self._scale
         for agent in AGENTS:
             s = self._state[agent]
             pos, heading = s["pos"], s["heading"]
+            pos_s = self._world_to_screen(pos)
             cfg = team_configs[agent]
 
             rays = self.track.ray_distances(pos, heading, MAX_RAY_DIST)
             for a, dist in zip(RAY_ANGLES, rays):
                 angle = heading + a
                 end = pos + dist * np.array([np.cos(angle), np.sin(angle)])
+                end_s = self._world_to_screen(end)
                 pygame.draw.line(
                     surf, cfg["ray"],
-                    (int(pos[0]), int(pos[1])),
-                    (int(end[0]), int(end[1])),
+                    (int(pos_s[0]), int(pos_s[1])),
+                    (int(end_s[0]), int(end_s[1])),
                     1,
                 )
-                pygame.draw.circle(surf, cfg["ray"], (int(end[0]), int(end[1])), 2)
+                pygame.draw.circle(surf, cfg["ray"], (int(end_s[0]), int(end_s[1])), 2)
 
-            fwd = np.array([np.cos(heading), np.sin(heading)])
+            fwd = np.array([np.cos(heading), np.sin(heading)]) * scale
             left = np.array([-fwd[1], fwd[0]])
+            c_hlen = CAR_HALF_LEN * scale
+            c_hwid = CAR_HALF_WIDTH * scale
 
             for ax, lat in ((6.5, 4.3), (6.5, -4.3), (-6.5, 4.3), (-6.5, -4.3)):
-                hub = pos + fwd * ax + left * lat
-                chassis_pt = pos + fwd * ax + left * (lat * 0.45)
+                hub = pos_s + fwd * ax + left * lat
+                chassis_pt = pos_s + fwd * ax + left * (lat * 0.45)
                 pygame.draw.line(surf, (40, 44, 52), (int(chassis_pt[0]), int(chassis_pt[1])), (int(hub[0]), int(hub[1])), 2)
 
             for ax, lat, w_len, w_wid in ((6.5, 4.3, 5.2, 2.4), (6.5, -4.3, 5.2, 2.4), (-6.5, 4.3, 5.8, 3.0), (-6.5, -4.3, 5.8, 3.0)):
-                t_center = pos + fwd * ax + left * lat
+                t_center = pos_s + fwd * ax + left * lat
                 t_fl = t_center + fwd * (w_len * 0.5) + left * (w_wid * 0.5)
                 t_fr = t_center + fwd * (w_len * 0.5) - left * (w_wid * 0.5)
                 t_rr = t_center - fwd * (w_len * 0.5) - left * (w_wid * 0.5)
@@ -877,76 +905,76 @@ class MultiRacingEnv(ParallelEnv):
                 pygame.draw.polygon(surf, (10, 10, 12), [(int(p[0]), int(p[1])) for p in (t_fl, t_fr, t_rr, t_rl)], 1)
                 pygame.draw.circle(surf, (190, 195, 205), (int(t_center[0]), int(t_center[1])), 1)
 
-            fw_c = pos + fwd * (CAR_HALF_LEN - 0.5)
-            fw_l = fw_c + left * CAR_HALF_WIDTH
-            fw_r = fw_c - left * CAR_HALF_WIDTH
-            pygame.draw.line(surf, (22, 24, 28), (int(fw_l[0]), int(fw_l[1])), (int(fw_r[0]), int(fw_r[1])), 3)
+            fw_c = pos_s + fwd * (c_hlen - 0.5 * scale)
+            fw_l = fw_c + left * c_hwid
+            fw_r = fw_c - left * c_hwid
+            pygame.draw.line(surf, (22, 24, 28), (int(fw_l[0]), int(fw_l[1])), (int(fw_r[0]), int(fw_r[1])), max(1, int(round(3 * scale))))
             pygame.draw.line(surf, cfg["accent"], (int(fw_l[0]), int(fw_l[1])), (int(fw_r[0]), int(fw_r[1])), 1)
             for endpt in (fw_l, fw_r):
                 ep_f = endpt + fwd * 2.2
                 ep_r = endpt - fwd * 1.5
-                pygame.draw.line(surf, cfg["primary"], (int(ep_f[0]), int(ep_f[1])), (int(ep_r[0]), int(ep_r[1])), 2)
+                pygame.draw.line(surf, cfg["primary"], (int(ep_f[0]), int(ep_f[1])), (int(ep_r[0]), int(ep_r[1])), max(1, int(round(2 * scale))))
 
-            rw_c = pos - fwd * (CAR_HALF_LEN - 0.5)
-            rw_l = rw_c + left * (CAR_HALF_WIDTH - 0.6)
-            rw_r = rw_c - left * (CAR_HALF_WIDTH - 0.6)
-            pygame.draw.line(surf, (20, 22, 26), (int(rw_l[0]), int(rw_l[1])), (int(rw_r[0]), int(rw_r[1])), 3)
+            rw_c = pos_s - fwd * (c_hlen - 0.5 * scale)
+            rw_l = rw_c + left * (c_hwid - 0.6 * scale)
+            rw_r = rw_c - left * (c_hwid - 0.6 * scale)
+            pygame.draw.line(surf, (20, 22, 26), (int(rw_l[0]), int(rw_l[1])), (int(rw_r[0]), int(rw_r[1])), max(1, int(round(3 * scale))))
             pygame.draw.line(surf, cfg["accent"], (int(rw_l[0]), int(rw_l[1])), (int(rw_r[0]), int(rw_r[1])), 1)
             for endpt in (rw_l, rw_r):
                 ep_f = endpt + fwd * 1.8
                 ep_r = endpt - fwd * 2.2
-                pygame.draw.line(surf, cfg["primary"], (int(ep_f[0]), int(ep_f[1])), (int(ep_r[0]), int(ep_r[1])), 2)
+                pygame.draw.line(surf, cfg["primary"], (int(ep_f[0]), int(ep_f[1])), (int(ep_r[0]), int(ep_r[1])), max(1, int(round(2 * scale))))
 
             chassis_pts = [
-                pos + fwd * CAR_HALF_LEN + left * 0.9,
-                pos + fwd * 4.0 + left * 1.6,
-                pos + fwd * 1.5 + left * 3.5,
-                pos - fwd * 4.5 + left * 3.2,
-                pos - fwd * 7.5 + left * 1.8,
-                pos - fwd * (CAR_HALF_LEN - 0.8) + left * 1.2,
-                pos - fwd * (CAR_HALF_LEN - 0.8) - left * 1.2,
-                pos - fwd * 7.5 - left * 1.8,
-                pos - fwd * 4.5 - left * 3.2,
-                pos + fwd * 1.5 - left * 3.5,
-                pos + fwd * 4.0 - left * 1.6,
-                pos + fwd * CAR_HALF_LEN - left * 0.9,
+                pos_s + fwd * c_hlen + left * 0.9,
+                pos_s + fwd * 4.0 + left * 1.6,
+                pos_s + fwd * 1.5 + left * 3.5,
+                pos_s - fwd * 4.5 + left * 3.2,
+                pos_s - fwd * 7.5 + left * 1.8,
+                pos_s - fwd * (c_hlen - 0.8 * scale) + left * 1.2,
+                pos_s - fwd * (c_hlen - 0.8 * scale) - left * 1.2,
+                pos_s - fwd * 7.5 - left * 1.8,
+                pos_s - fwd * 4.5 - left * 3.2,
+                pos_s + fwd * 1.5 - left * 3.5,
+                pos_s + fwd * 4.0 - left * 1.6,
+                pos_s + fwd * c_hlen - left * 0.9,
             ]
             pygame.draw.polygon(surf, cfg["primary"], [(int(p[0]), int(p[1])) for p in chassis_pts])
             pygame.draw.polygon(surf, (15, 18, 22), [(int(p[0]), int(p[1])) for p in chassis_pts], 1)
 
-            nose_top = pos + fwd * (CAR_HALF_LEN - 0.5)
+            nose_top = pos_s + fwd * (c_hlen - 0.5 * scale)
             pygame.draw.circle(surf, cfg["detail"], (int(nose_top[0]), int(nose_top[1])), 2)
 
-            stripe_f = pos + fwd * 4.5
-            stripe_r = pos - fwd * 6.5
-            pygame.draw.line(surf, cfg["accent"], (int(stripe_f[0]), int(stripe_f[1])), (int(stripe_r[0]), int(stripe_r[1])), 2)
+            stripe_f = pos_s + fwd * 4.5
+            stripe_r = pos_s - fwd * 6.5
+            pygame.draw.line(surf, cfg["accent"], (int(stripe_f[0]), int(stripe_f[1])), (int(stripe_r[0]), int(stripe_r[1])), max(1, int(round(2 * scale))))
 
-            cockpit_f = pos + fwd * 1.5
-            cockpit_r = pos - fwd * 2.2
+            cockpit_f = pos_s + fwd * 1.5
+            cockpit_r = pos_s - fwd * 2.2
             cockpit_pts = [
                 cockpit_f,
-                pos + fwd * 0.4 + left * 1.1,
+                pos_s + fwd * 0.4 + left * 1.1,
                 cockpit_r + left * 0.9,
                 cockpit_r - left * 0.9,
-                pos + fwd * 0.4 - left * 1.1,
+                pos_s + fwd * 0.4 - left * 1.1,
             ]
             pygame.draw.polygon(surf, (14, 16, 20), [(int(p[0]), int(p[1])) for p in cockpit_pts])
             pygame.draw.polygon(surf, (45, 52, 65), [(int(p[0]), int(p[1])) for p in cockpit_pts], 1)
 
-            helmet_pos = pos - fwd * 0.6
+            helmet_pos = pos_s - fwd * 0.6
             pygame.draw.circle(surf, cfg["detail"], (int(helmet_pos[0]), int(helmet_pos[1])), 2)
 
-            halo_center = pos + fwd * 0.3
+            halo_center = pos_s + fwd * 0.3
             pygame.draw.circle(surf, (30, 35, 42), (int(halo_center[0]), int(halo_center[1])), 3, 1)
 
-            tail_light = pos - fwd * (CAR_HALF_LEN - 0.5)
+            tail_light = pos_s - fwd * (c_hlen - 0.5 * scale)
             pygame.draw.circle(surf, (255, 30, 30), (int(tail_light[0]), int(tail_light[1])), 2)
 
             if self._state[AGENTS[0]]["prev_colliding"]:
-                fl = pos + fwd * CAR_HALF_LEN + left * CAR_HALF_WIDTH
-                fr = pos + fwd * CAR_HALF_LEN - left * CAR_HALF_WIDTH
-                rr = pos - fwd * CAR_HALF_LEN - left * CAR_HALF_WIDTH
-                rl = pos - fwd * CAR_HALF_LEN + left * CAR_HALF_WIDTH
+                fl = pos_s + fwd * c_hlen + left * c_hwid
+                fr = pos_s + fwd * c_hlen - left * c_hwid
+                rr = pos_s - fwd * c_hlen - left * c_hwid
+                rl = pos_s - fwd * c_hlen + left * c_hwid
                 pygame.draw.polygon(
                     surf, (255, 220, 40),
                     [(int(p[0]), int(p[1])) for p in (fl, fr, rr, rl)],
@@ -1056,7 +1084,7 @@ class MultiRacingEnv(ParallelEnv):
         surf.blit(font_body.render("CONTROLS & SHORTCUTS:", True, (160, 185, 215)), (SIDEBAR_X + 26, 618))
         surf.blit(font_num.render("ESC / Q : Exit viewer", True, (210, 220, 235)), (SIDEBAR_X + 26, 638))
         surf.blit(font_num.render("R       : Restart race grid", True, (210, 220, 235)), (SIDEBAR_X + 26, 658))
-        surf.blit(font_sub.render("1280x720 DISPLAY | 30 FPS LOCK", True, (130, 150, 175)), (SIDEBAR_X + 26, 678))
+        surf.blit(font_sub.render(f"{W}x{H} DISPLAY | 30 FPS LOCK", True, (130, 150, 175)), (SIDEBAR_X + 26, 678))
 
         if self.render_mode == "human":
             pygame.event.pump()

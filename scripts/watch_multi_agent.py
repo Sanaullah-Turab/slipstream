@@ -20,6 +20,12 @@ def build_parser():
         default=False,
         help="Use stochastic actions instead of deterministic.",
     )
+    parser.add_argument(
+        "--size",
+        default="1600x900",
+        choices=["1600x900", "1920x1080"],
+        help="Window resolution (1600x900 or 1920x1080).",
+    )
     return parser
 
 
@@ -27,7 +33,8 @@ def main():
     parser = build_parser()
     args = parser.parse_args()
 
-    env = MultiRacingEnv(render_mode="human")
+    w, h = (int(x) for x in args.size.split("x"))
+    env = MultiRacingEnv(render_mode="human", window_size=(w, h))
     model = load_model(args.checkpoint, env)
     obs_dict, _ = env.reset()
     env.render()
