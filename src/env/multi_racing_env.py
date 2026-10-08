@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Optional
-
+import collections
 import math
 import numpy as np
 from pettingzoo import ParallelEnv
@@ -49,6 +49,17 @@ LATERAL_HISTORY_LEN = 20
 
 POSITION_K = DEFAULT_POSITION_K
 POSITION_G0 = DEFAULT_POSITION_G0
+_STREAK_OFFSETS = ((0.12, -0.35), (0.28, 0.40), (0.45, -0.15), (0.60, 0.30), (0.75, -0.25), (0.88, 0.15))
+_TRAIL_SHADES = {
+    "agent_0": [
+        (int(28 + (40 - 28) * t), int(30 + (130 - 30) * t), int(35 + (240 - 35) * t))
+        for t in np.linspace(0.08, 0.85, 20)
+    ],
+    "agent_1": [
+        (int(28 + (220 - 28) * t), int(30 + (25 - 30) * t), int(35 + (40 - 35) * t))
+        for t in np.linspace(0.08, 0.85, 20)
+    ],
+}
 
 
 def compute_draft_intensity(
@@ -166,6 +177,8 @@ class MultiRacingEnv(ParallelEnv):
         self._fonts = None
         self._car_sprites_base = None
         self._car_rot_cache = None
+        self._car_trails = {a: collections.deque(maxlen=20) for a in AGENTS}
+        self._prev_rear_axle_s = {a: None for a in AGENTS}
 
     def _compute_transform(self) -> None:
         min_x = float(np.min(self.track.outer[:, 0])) - 25.0
@@ -292,6 +305,10 @@ class MultiRacingEnv(ParallelEnv):
 
         if self._track_surface is not None and getattr(self, "_pristine_track_surface", None) is not None:
             self._track_surface.blit(self._pristine_track_surface, (0, 0))
+        self._prev_rear_axle_s = {a: None for a in AGENTS}
+        if getattr(self, "_car_trails", None) is not None:
+            for a in AGENTS:
+                self._car_trails[a].clear()
 
         if hasattr(self.track, "get_starting_grid") and getattr(self.track, "circuit", "") == "shanghai":
             grid = self.track.get_starting_grid()
@@ -1023,8 +1040,66 @@ class MultiRacingEnv(ParallelEnv):
                 "f1": pygame.font.SysFont(font_family, 14, bold=True),
             }
 
+        if self._car_trails is None:
+            self._car_trails = {a: collections.deque(maxlen=20) for a in AGENTS}
+        if self._prev_rear_axle_s is None:
+            self._prev_rear_axle_s = {a: None for a in AGENTS}
+
+        for agent in AGENTS:
+            s = self._state[agent]
+            pos, heading = s["pos"], s["heading"]
+            fwd = np.array([math.cos(heading), math.sin(heading)])
+            rear_axle = pos - fwd * (WHEELBASE * 0.5)
+            rear_axle_s = self._world_to_screen(rear_axle)
+            curr_axle = (int(round(rear_axle_s[0])), int(round(rear_axle_s[1])))
+            prev_axle = self._prev_rear_axle_s[agent]
+            if prev_axle is not None and prev_axle != curr_axle:
+                pygame.draw.line(self._track_surface, (16, 17, 19), prev_axle, curr_axle, 2)
+            self._prev_rear_axle_s[agent] = curr_axle
+
         surf = self._screen
         surf.blit(self._track_surface, (0, 0))
+
+        for agent in AGENTS:
+            pos_s = self._world_to_screen(self._state[agent]["pos"])
+            pt = (int(round(pos_s[0])), int(round(pos_s[1])))
+            trail = self._car_trails[agent]
+            trail.append(pt)
+            shades = _TRAIL_SHADES[agent]
+            n = len(trail)
+            if n >= 2:
+                for i in range(n - 1):
+                    pygame.draw.line(surf, shades[i + (20 - n)], trail[i], trail[i + 1], 1)
+
+        draft_0 = self._state["agent_0"].get("draft_intensity", 0.0)
+        draft_1 = self._state["agent_1"].get("draft_intensity", 0.0)
+        if draft_0 > 0.0 or draft_1 > 0.0:
+            lead_ag = "agent_1" if draft_0 > draft_1 else "agent_0"
+            lead_s = self._state[lead_ag]
+            l_pos, l_head = lead_s["pos"], lead_s["heading"]
+            fwd = np.array([math.cos(l_head), math.sin(l_head)])
+            lat_vec = np.array([-fwd[1], fwd[0]])
+            rear_c = l_pos - fwd * CAR_HALF_LEN
+            cone_len = DRAFT_CONE_LENGTH
+            cone_hw = cone_len * math.tan(DRAFT_CONE_HALF_ANGLE)
+            cone_end = rear_c - fwd * cone_len
+            end_l = cone_end + lat_vec * cone_hw
+            end_r = cone_end - lat_vec * cone_hw
+            s_rear = self._world_to_screen(rear_c)
+            s_el = self._world_to_screen(end_l)
+            s_er = self._world_to_screen(end_r)
+            pygame.draw.aaline(surf, (60, 180, 200), (int(s_rear[0]), int(s_rear[1])), (int(s_el[0]), int(s_el[1])))
+            pygame.draw.aaline(surf, (60, 180, 200), (int(s_rear[0]), int(s_rear[1])), (int(s_er[0]), int(s_er[1])))
+            phase = (self._step_count * 0.06) % 1.0
+            s_len = 0.08 * cone_len
+            for u_base, v_base in _STREAK_OFFSETS:
+                u = (u_base + phase) % 1.0
+                v = v_base * u
+                pt1 = rear_c - fwd * (u * cone_len) + lat_vec * (v * cone_hw)
+                pt2 = pt1 - fwd * s_len
+                sp1 = self._world_to_screen(pt1)
+                sp2 = self._world_to_screen(pt2)
+                pygame.draw.aaline(surf, (60, 180, 200), (int(sp1[0]), int(sp1[1])), (int(sp2[0]), int(sp2[1])))
 
         team_configs = {
             "agent_0": {
@@ -1208,4 +1283,6 @@ class MultiRacingEnv(ParallelEnv):
         self._fonts = None
         self._car_sprites_base = None
         self._car_rot_cache = None
+        self._car_trails = None
+        self._prev_rear_axle_s = None
 
