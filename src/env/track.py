@@ -219,8 +219,8 @@ def _build_shanghai_geometry(actual_width: float) -> tuple[np.ndarray, np.ndarra
     d_min = _check(cl, arc, total_l, actual_width)
     r_min = float(1.0 / (np.max(np.abs(curv)) + 1e-12))
 
-    scale_d = (1.4 * actual_width) / d_min if d_min < 1.4 * actual_width else 1.0
-    scale_r = (0.8 * actual_width) / r_min if r_min < 0.8 * actual_width else 1.0
+    scale_d = (1.4 * actual_width * 1.01) / d_min if d_min < 1.4 * actual_width else 1.0
+    scale_r = (0.8 * actual_width * 1.01) / r_min if r_min < 0.8 * actual_width else 1.0
     final_scale = max(1.0, scale_d, scale_r)
 
     if final_scale > 1.0:
