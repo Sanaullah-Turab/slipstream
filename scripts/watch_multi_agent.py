@@ -29,7 +29,7 @@ def build_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--checkpoint",
-        default="checkpoints/shanghai/shanghai-f1-grand-prix-49c5480/final",
+        default="checkpoints/phase4/slipstream-p4-1b-7b1372f/final",
         help="Path to multi-agent checkpoint (with or without .zip).",
     )
     parser.add_argument(
