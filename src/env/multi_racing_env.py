@@ -1159,6 +1159,24 @@ class MultiRacingEnv(ParallelEnv):
 
         return np.transpose(np.array(pygame.surfarray.pixels3d(surf)), axes=(1, 0, 2))
 
+    def set_camera_mode(self, mode: str) -> None:
+        if self._camera is not None:
+            self._camera.mode = mode
+
+    def toggle_camera_overview(self) -> bool:
+        self._camera_overview = not self._camera_overview
+        return self._camera_overview
+
+    def zoom_in(self) -> float:
+        if self._tile_cache is not None:
+            return self._tile_cache.zoom_in()
+        return 3.2
+
+    def zoom_out(self) -> float:
+        if self._tile_cache is not None:
+            return self._tile_cache.zoom_out()
+        return 3.2
+
     def close(self) -> None:
         if self._screen is not None:
             import pygame
