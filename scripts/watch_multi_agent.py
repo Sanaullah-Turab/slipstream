@@ -49,6 +49,12 @@ def build_parser():
         default=60,
         help="Render frames per second (default 60).",
     )
+    parser.add_argument(
+        "--speed",
+        type=int,
+        default=2,
+        help="Simulation steps per rendered frame (default 2).",
+    )
     return parser
 
 
@@ -102,7 +108,8 @@ def main():
             if not running:
                 break
 
-            if frame_idx % step_subdiv == 0:
+            steps_per_frame = max(1, args.speed)
+            for _ in range(steps_per_frame):
                 for agent in AGENTS:
                     action, _ = model.predict(obs_dict[agent], deterministic=not args.stochastic)
                     actions[agent] = action
@@ -115,6 +122,7 @@ def main():
                         print(f"{agent}: laps={info['laps']}  collisions={info['collision_count']}")
                     obs_dict, _ = env.reset()
                     frame_idx = 0
+                    break
 
             env.render()
             clock.tick(args.fps)

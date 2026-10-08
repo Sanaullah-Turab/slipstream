@@ -1074,18 +1074,6 @@ class MultiRacingEnv(ParallelEnv):
             pos_s = to_screen(pos)
             cfg = team_configs[agent]
 
-            rays = self.track.ray_distances(pos, heading, MAX_RAY_DIST)
-            for a, dist in zip(RAY_ANGLES, rays):
-                angle = heading + a
-                end = pos + dist * np.array([np.cos(angle), np.sin(angle)])
-                end_s = to_screen(end)
-                pygame.draw.line(
-                    surf, cfg["ray"],
-                    (int(pos_s[0]), int(pos_s[1])),
-                    (int(end_s[0]), int(end_s[1])),
-                    1,
-                )
-                pygame.draw.circle(surf, cfg["ray"], (int(end_s[0]), int(end_s[1])), 2)
 
             car_surf = self._get_car_sprite(agent, heading, current_zoom)
             rect = car_surf.get_rect(center=(int(pos_s[0]), int(pos_s[1])))

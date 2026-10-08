@@ -31,13 +31,14 @@ class CarState(NamedTuple):
 
 
 class CarParams(NamedTuple):
-    max_accel: float = 80.0
+    max_accel: float = 90.0
     max_speed: float = 150.0
     drag: float = 0.003
     rolling: float = 0.1
     wheelbase: float = WHEELBASE
     max_steer: float = 0.5
     steer_damp: float = 0.7
+    corner_drag: float = 0.35
 
 
 DEFAULT_PARAMS = CarParams()
@@ -58,14 +59,16 @@ def step_physics(
     eff_drag = params.drag * (1.0 - DRAFT_DRAG_REDUCTION * draft_intensity)
     eff_max_speed = params.max_speed + DRAFT_SPEED_BOOST * draft_intensity
 
-    accel = throttle * params.max_accel - eff_drag * v * v - params.rolling * v
+    steer_eff = steer * params.max_steer * (1.0 - params.steer_damp * v / params.max_speed)
+    beta = math.atan(0.5 * math.tan(steer_eff))
+    lat_scrub = getattr(params, "corner_drag", 0.35) * abs(math.sin(beta)) * v * 2.0
+
+    accel = throttle * params.max_accel - eff_drag * v * v - params.rolling * v - lat_scrub
     if v > eff_max_speed:
         v_new = max(0.0, min(v, v + accel * dt))
     else:
         v_new = max(0.0, min(v + accel * dt, eff_max_speed))
 
-    steer_eff = steer * params.max_steer * (1.0 - params.steer_damp * v / params.max_speed)
-    beta = math.atan(0.5 * math.tan(steer_eff))
     heading_rate = (v_new / lr) * math.sin(beta)
 
     theta = state.heading
