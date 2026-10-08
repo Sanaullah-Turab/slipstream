@@ -875,169 +875,18 @@ class MultiRacingEnv(ParallelEnv):
 
     def _bake_track_surface(self, W: int, H: int, sidebar_x: int) -> None:
         import pygame
+        from src.viewer.world import draw_static_world
 
         if self._scale is None:
             self._compute_transform()
 
+        origin_wx = -self._offset[0] / self._scale
+        origin_wy = -self._offset[1] / self._scale
+        max_wx = origin_wx + W / self._scale
+        max_wy = origin_wy + H / self._scale
+
         surf_2x = pygame.Surface((W * 2, H * 2))
-        surf_2x.fill((18, 30, 20))
-
-        w2 = sidebar_x * 2
-        h2 = H * 2
-        step = 60
-        for d in range(-h2, w2 + h2, step * 2):
-            pts = [(d, 0), (d + step, 0), (d + step - h2, h2), (d - h2, h2)]
-            pygame.draw.polygon(surf_2x, (22, 35, 24), pts)
-
-        N = len(self.track.centerline)
-        outer = self.track.outer
-        inner = self.track.inner
-        curv = self.track.curvatures
-        norm = self.track.normals
-        tang = self.track.tangents
-        w_track = self.track.half_width * 2.0
-
-        pit_indices = list(range(5850, N)) + list(range(0, 350))
-        w_pit = 0.5 * w_track
-        for idx in range(len(pit_indices) - 1):
-            i = pit_indices[idx]
-            nxt = pit_indices[idx + 1]
-            p0 = inner[i]
-            p1 = inner[nxt]
-            pit0 = p0 - norm[i] * w_pit
-            pit1 = p1 - norm[nxt] * w_pit
-            pygame.draw.polygon(surf_2x, (27, 28, 31), [self._world_to_screen_2x(p) for p in (p0, p1, pit1, pit0)])
-            pygame.draw.line(surf_2x, (140, 145, 155), self._world_to_screen_2x(p0), self._world_to_screen_2x(p1), 4)
-
-        team_colors = [
-            (195, 25, 30), (15, 25, 75), (0, 160, 140), (255, 135, 0), (0, 110, 75),
-            (30, 65, 180), (180, 20, 40), (80, 140, 200), (220, 220, 225), (70, 75, 85)
-        ]
-        for b_i, i in enumerate(pit_indices[20:-20:25]):
-            center = inner[i] - norm[i] * (w_pit + 4.0)
-            f_box = tang[i] * 10.0
-            s_box = norm[i] * 4.0
-            pts = [center + f_box + s_box, center + f_box - s_box, center - f_box - s_box, center - f_box + s_box]
-            col = team_colors[b_i % len(team_colors)]
-            pygame.draw.polygon(surf_2x, col, [self._world_to_screen_2x(p) for p in pts])
-
-        for i in range(N):
-            nxt = (i + 1) % N
-            r_i = 1.0 / (abs(curv[i]) + 1e-9)
-            r_nxt = 1.0 / (abs(curv[nxt]) + 1e-9)
-            t_i = min(1.0, max(0.0, (6.0 * w_track / r_i - 1.0) / 0.3)) if r_i < 6.0 * w_track else 0.0
-            t_nxt = min(1.0, max(0.0, (6.0 * w_track / r_nxt - 1.0) / 0.3)) if r_nxt < 6.0 * w_track else 0.0
-            if t_i > 0 or t_nxt > 0:
-                if curv[i] >= 0:
-                    p0, p1 = inner[i], inner[nxt]
-                    ro0 = p0 - norm[i] * (0.35 * w_track * t_i)
-                    ro1 = p1 - norm[nxt] * (0.35 * w_track * t_nxt)
-                    gr0 = ro0 - norm[i] * (0.25 * w_track * t_i)
-                    gr1 = ro1 - norm[nxt] * (0.25 * w_track * t_nxt)
-                else:
-                    p0, p1 = outer[i], outer[nxt]
-                    ro0 = p0 + norm[i] * (0.35 * w_track * t_i)
-                    ro1 = p1 + norm[nxt] * (0.35 * w_track * t_nxt)
-                    gr0 = ro0 + norm[i] * (0.25 * w_track * t_i)
-                    gr1 = ro1 + norm[nxt] * (0.25 * w_track * t_nxt)
-                pygame.draw.polygon(surf_2x, (194, 168, 126), [self._world_to_screen_2x(p) for p in (ro0, ro1, gr1, gr0)])
-                pygame.draw.polygon(surf_2x, (52, 54, 58), [self._world_to_screen_2x(p) for p in (p0, p1, ro1, ro0)])
-
-        for i in range(N):
-            nxt = (i + 1) % N
-            noise = ((i * 73 + 19) % 7) - 3
-            col = (32 + noise, 33 + noise, 36 + noise)
-            poly = [self._world_to_screen_2x(outer[i]), self._world_to_screen_2x(outer[nxt]), self._world_to_screen_2x(inner[nxt]), self._world_to_screen_2x(inner[i])]
-            pygame.draw.polygon(surf_2x, col, poly)
-
-        for idx in range(3980, 5220, 50):
-            c = self.track.centerline[idx]
-            t_vec = tang[idx]
-            n_vec = norm[idx]
-            tip = c + t_vec * 8.0
-            pl = c - t_vec * 4.0 - n_vec * 6.0
-            pr = c - t_vec * 4.0 + n_vec * 6.0
-            pygame.draw.lines(surf_2x, (44, 46, 52), False, [self._world_to_screen_2x(pl), self._world_to_screen_2x(tip), self._world_to_screen_2x(pr)], 4)
-
-        for idx in range(50, 320, 50):
-            c = self.track.centerline[idx]
-            t_vec = tang[idx]
-            n_vec = norm[idx]
-            tip = c + t_vec * 8.0
-            pl = c - t_vec * 4.0 - n_vec * 6.0
-            pr = c - t_vec * 4.0 + n_vec * 6.0
-            pygame.draw.lines(surf_2x, (44, 46, 52), False, [self._world_to_screen_2x(pl), self._world_to_screen_2x(tip), self._world_to_screen_2x(pr)], 4)
-
-        p_out = outer[0]
-        p_in = inner[0]
-        tang0 = tang[0]
-        for col in range(14):
-            for row in range(2):
-                is_white = (col + row) % 2 == 0
-                c = (245, 248, 255) if is_white else (25, 27, 30)
-                t0 = col / 14.0
-                t1 = (col + 1) / 14.0
-                p0a = p_in + (p_out - p_in) * t0 + tang0 * (row * 3.0)
-                p1a = p_in + (p_out - p_in) * t1 + tang0 * (row * 3.0)
-                p1b = p_in + (p_out - p_in) * t1 + tang0 * ((row + 1) * 3.0)
-                p0b = p_in + (p_out - p_in) * t0 + tang0 * ((row + 1) * 3.0)
-                pygame.draw.polygon(surf_2x, c, [self._world_to_screen_2x(p) for p in (p0a, p1a, p1b, p0b)])
-
-        box_hl = (CAR_LENGTH * 1.15) / 2.0
-        box_hw = (CAR_WIDTH * 1.5) / 2.0
-        for k in range(20):
-            s_slot = (self.track.total_length - 1.0 * w_track - k * 0.57 * w_track) % self.track.total_length
-            idx_slot = int(np.clip(s_slot / 2.0, 0, len(self.track.centerline) - 1))
-            t_slot = tang[idx_slot]
-            n_slot = norm[idx_slot]
-            lat_sign = 1.0 if (k % 2 == 0) else -1.0
-            lat_off = lat_sign * (0.22 * w_track)
-            pos_slot = self.track.centerline[idx_slot] + n_slot * lat_off
-            fwd = t_slot * box_hl
-            side = n_slot * box_hw
-            box_pts = [pos_slot + fwd + side, pos_slot + fwd - side, pos_slot - fwd - side, pos_slot - fwd + side]
-            poly = [self._world_to_screen_2x(p) for p in box_pts]
-            pygame.draw.polygon(surf_2x, (230, 235, 245), poly, 2)
-            pygame.draw.line(surf_2x, (245, 248, 255), poly[0], poly[1], 5)
-
-        for i in range(N):
-            nxt = (i + 1) % N
-            r_i = 1.0 / (abs(curv[i]) + 1e-9)
-            r_nxt = 1.0 / (abs(curv[nxt]) + 1e-9)
-            t_i = min(1.0, max(0.0, (4.0 * w_track / r_i - 1.0) / 0.3)) if r_i < 4.0 * w_track else 0.0
-            t_nxt = min(1.0, max(0.0, (4.0 * w_track / r_nxt - 1.0) / 0.3)) if r_nxt < 4.0 * w_track else 0.0
-            if t_i > 0 or t_nxt > 0:
-                if curv[i] >= 0:
-                    p0, p1 = outer[i], outer[nxt]
-                    k0 = p0 + norm[i] * (0.07 * w_track * t_i)
-                    k1 = p1 + norm[nxt] * (0.07 * w_track * t_nxt)
-                else:
-                    p0, p1 = inner[i], inner[nxt]
-                    k0 = p0 - norm[i] * (0.07 * w_track * t_i)
-                    k1 = p1 - norm[nxt] * (0.07 * w_track * t_nxt)
-                is_red = (i // 4) % 2 == 0
-                col = (215, 30, 30) if is_red else (245, 245, 248)
-                pygame.draw.polygon(surf_2x, col, [self._world_to_screen_2x(p) for p in (p0, p1, k1, k0)])
-
-        outer_2x = [self._world_to_screen_2x(p) for p in outer]
-        inner_2x = [self._world_to_screen_2x(p) for p in inner]
-        pygame.draw.lines(surf_2x, (240, 242, 248), True, outer_2x, 6)
-        pygame.draw.lines(surf_2x, (240, 242, 248), True, inner_2x, 6)
-
-        corner_labels = [
-            (1, (790, 62)), (2, (835, 160)), (3, (770, 188)), (4, (795, 283)),
-            (5, (1090, 192)), (6, (1328, 283)), (7, (935, 402)), (8, (922, 628)),
-            (9, (807, 693)), (10, (790, 797)), (11, (1283, 797)), (12, (1288, 672)),
-            (13, (1403, 793)), (14, (97, 884)), (15, (183, 808)), (16, (490, 835)),
-        ]
-        ref_scale = self.track.centerline[0, 0] / 599.05
-        font_cnum = pygame.font.Font(None, 24)
-        for num, (rx, ry) in corner_labels:
-            w_pt = np.array([rx * ref_scale, ry * ref_scale])
-            s_pt = self._world_to_screen_2x(w_pt)
-            txt = font_cnum.render(str(num), True, (215, 225, 240))
-            rect = txt.get_rect(center=(int(s_pt[0]), int(s_pt[1])))
-            surf_2x.blit(txt, rect)
+        draw_static_world(surf_2x, self.track, (origin_wx, origin_wy, max_wx, max_wy), self._scale * 2.0)
 
         scaled = pygame.transform.smoothscale(surf_2x, (W, H))
         try:
