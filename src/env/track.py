@@ -3,7 +3,8 @@ from typing import NamedTuple
 import numpy as np
 from scipy.interpolate import splprep, splev
 
-TRACK_WIDTH = 44.0
+TRACK_WIDTH = 70.0
+SHANGHAI_TRACK_WIDTH = 44.0
 LEGACY_TRACK_WIDTH = 70.0
 N_SAMPLES = 2000
 LEGACY_N_SAMPLES = 800
@@ -178,9 +179,10 @@ class TrackState(NamedTuple):
 
 
 class Track:
-    def __init__(self, width: float = TRACK_WIDTH, circuit: str = "shanghai", n_samples: int | None = None) -> None:
+    def __init__(self, width: float | None = None, circuit: str = "shanghai", n_samples: int | None = None) -> None:
         self.circuit = circuit
-        self.half_width = width / 2.0
+        actual_width = width if width is not None else (SHANGHAI_TRACK_WIDTH if circuit == "shanghai" else TRACK_WIDTH)
+        self.half_width = actual_width / 2.0
         if n_samples is not None:
             self.n_samples = n_samples
         else:
