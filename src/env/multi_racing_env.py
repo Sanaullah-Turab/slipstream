@@ -163,39 +163,78 @@ class MultiRacingEnv(ParallelEnv):
         self.agents = AGENTS[:]
         self._step_count = 0
 
-        slots = [0, self.spawn_offset_idx]
-        if self.np_random.integers(0, 2):
-            slots = slots[::-1]
+        if hasattr(self.track, "get_starting_grid") and getattr(self.track, "circuit", "") == "shanghai":
+            grid = self.track.get_starting_grid()
+            keys = ["agent_0", "agent_1"]
+            if self.np_random.integers(0, 2):
+                keys = keys[::-1]
+            self._state = {}
+            for agent, slot_key in zip(AGENTS, keys):
+                pos, heading = grid[slot_key]
+                ts = self.track.get_track_state(pos)
+                self._state[agent] = {
+                    "pos": pos.copy(),
+                    "heading": heading,
+                    "speed": 0.0,
+                    "heading_rate": 0.0,
+                    "progress": ts.progress,
+                    "lateral": ts.lateral,
+                    "track_heading": ts.track_heading,
+                    "arc_length": ts.arc_length,
+                    "laps": 0,
+                    "lap_start_time": None,
+                    "last_lap_time": None,
+                    "best_lap_time": None,
+                    "gap_to_leader_seconds": 0.0,
+                    "cumulative_distance": 0.0,
+                    "respawn": False,
+                    "respawns": 0,
+                    "prev_colliding": False,
+                    "collision_count": 0,
+                    "steps_in_contact": 0,
+                    "start_offset": ts.arc_length,
+                    "lateral_history": [ts.lateral] * LATERAL_HISTORY_LEN,
+                    "fault_log": {"follower": 0, "leader": 0, "neutral": 0},
+                    "draft_intensity": 0.0,
+                }
+        else:
+            slots = [0, self.spawn_offset_idx]
+            if self.np_random.integers(0, 2):
+                slots = slots[::-1]
 
-        self._state = {}
-        for agent, slot in zip(AGENTS, slots):
-            lat_offset = float(self.np_random.uniform(-5.0, 5.0))
-            pos = self.track.centerline[slot] + self.track.normals[slot] * lat_offset
-            heading = float(
-                np.arctan2(self.track.tangents[slot, 1], self.track.tangents[slot, 0])
-            )
-            ts = self.track.get_track_state(pos)
-            self._state[agent] = {
-                "pos": pos.copy(),
-                "heading": heading,
-                "speed": 0.0,
-                "heading_rate": 0.0,
-                "progress": ts.progress,
-                "lateral": ts.lateral,
-                "track_heading": ts.track_heading,
-                "arc_length": ts.arc_length,
-                "laps": -1 if ts.progress > 0.5 else 0,
-                "cumulative_distance": 0.0,
-                "respawn": False,
-                "respawns": 0,
-                "prev_colliding": False,
-                "collision_count": 0,
-                "steps_in_contact": 0,
-                "start_offset": ts.arc_length,
-                "lateral_history": [ts.lateral] * LATERAL_HISTORY_LEN,
-                "fault_log": {"follower": 0, "leader": 0, "neutral": 0},
-                "draft_intensity": 0.0,
-            }
+            self._state = {}
+            for agent, slot in zip(AGENTS, slots):
+                lat_offset = float(self.np_random.uniform(-5.0, 5.0))
+                pos = self.track.centerline[slot] + self.track.normals[slot] * lat_offset
+                heading = float(
+                    np.arctan2(self.track.tangents[slot, 1], self.track.tangents[slot, 0])
+                )
+                ts = self.track.get_track_state(pos)
+                self._state[agent] = {
+                    "pos": pos.copy(),
+                    "heading": heading,
+                    "speed": 0.0,
+                    "heading_rate": 0.0,
+                    "progress": ts.progress,
+                    "lateral": ts.lateral,
+                    "track_heading": ts.track_heading,
+                    "arc_length": ts.arc_length,
+                    "laps": -1 if ts.progress > 0.5 else 0,
+                    "lap_start_time": None,
+                    "last_lap_time": None,
+                    "best_lap_time": None,
+                    "gap_to_leader_seconds": 0.0,
+                    "cumulative_distance": 0.0,
+                    "respawn": False,
+                    "respawns": 0,
+                    "prev_colliding": False,
+                    "collision_count": 0,
+                    "steps_in_contact": 0,
+                    "start_offset": ts.arc_length,
+                    "lateral_history": [ts.lateral] * LATERAL_HISTORY_LEN,
+                    "fault_log": {"follower": 0, "leader": 0, "neutral": 0},
+                    "draft_intensity": 0.0,
+                }
 
         self._position_swaps = 0
         self._last_respawn_step = {a: -9999 for a in AGENTS}
@@ -295,6 +334,10 @@ class MultiRacingEnv(ParallelEnv):
             "position_swaps": self._position_swaps,
             "draft_intensity": s.get("draft_intensity", 0.0),
             "is_drafting": s.get("draft_intensity", 0.0) > 0.0,
+            "lap_start_time": s.get("lap_start_time", None),
+            "last_lap_time": s.get("last_lap_time", None),
+            "best_lap_time": s.get("best_lap_time", None),
+            "gap_to_leader_seconds": s.get("gap_to_leader_seconds", 0.0),
         }
 
     def step(self, actions: dict[str, np.ndarray]):
@@ -317,6 +360,13 @@ class MultiRacingEnv(ParallelEnv):
 
         for agent in self.agents:
             s = self._state[agent]
+            ts_start = self.track.get_track_state(s["pos"])
+            s["progress"] = ts_start.progress
+            s["lateral"] = ts_start.lateral
+            s["track_heading"] = ts_start.track_heading
+            s["arc_length"] = ts_start.arc_length
+            if abs(s["lateral"]) < 1e-4 and s["speed"] == 0.0:
+                s["heading"] = ts_start.track_heading
             s["respawn"] = False
             action = actions[agent]
             steer = float(np.clip(action[0], -1.0, 1.0))
@@ -351,7 +401,17 @@ class MultiRacingEnv(ParallelEnv):
             s["track_heading"] = ts.track_heading
 
             if s["progress"] - prev_state.progress < -0.5:
-                s["laps"] += 1
+                curr_time = self._step_count * DT
+                if s["lap_start_time"] is None:
+                    s["laps"] = 1
+                    s["lap_start_time"] = curr_time
+                else:
+                    lap_time = curr_time - s["lap_start_time"]
+                    s["last_lap_time"] = lap_time
+                    if s["best_lap_time"] is None or lap_time < s["best_lap_time"]:
+                        s["best_lap_time"] = lap_time
+                    s["lap_start_time"] = curr_time
+                    s["laps"] += 1
 
             s["arc_length"] = ts.arc_length
 
@@ -359,6 +419,8 @@ class MultiRacingEnv(ParallelEnv):
                 arc_delta = s["arc_length"] - prev_state.arc_length
                 if arc_delta < -self.track.total_length / 2.0:
                     arc_delta += self.track.total_length
+                elif arc_delta > self.track.total_length / 2.0:
+                    arc_delta -= self.track.total_length
                 s["cumulative_distance"] += max(0.0, arc_delta)
 
             s["lateral_history"].append(ts.lateral)
@@ -508,6 +570,16 @@ class MultiRacingEnv(ParallelEnv):
             rewards[AGENTS[0]] += r_pos_0
             rewards[AGENTS[1]] += r_pos_1
 
+        gap_dist = abs(race_pos_0 - race_pos_1)
+        if race_pos_0 >= race_pos_1:
+            leader_ag, follower_ag = AGENTS[0], AGENTS[1]
+        else:
+            leader_ag, follower_ag = AGENTS[1], AGENTS[0]
+        follower_spd = self._state[follower_ag]["speed"]
+        gap_sec = float(gap_dist / max(follower_spd, 15.0)) if gap_dist > 0.05 else 0.0
+        self._state[leader_ag]["gap_to_leader_seconds"] = 0.0
+        self._state[follower_ag]["gap_to_leader_seconds"] = gap_sec
+
         truncated = self._step_count >= MAX_STEPS
 
         for agent in self.agents:
@@ -646,15 +718,25 @@ class MultiRacingEnv(ParallelEnv):
             c_chk = (245, 245, 250) if k % 2 == 0 else (25, 25, 25)
             pygame.draw.line(surf, c_chk, (int(pt0[0]), int(pt0[1])), (int(pt1[0]), int(pt1[1])), 5)
 
-        norm0 = self.track.normals[15]
-        tang0 = self.track.tangents[15]
-        slot1_pos = self.track.centerline[15] - norm0 * 12.0
-        slot2_pos = self.track.centerline[15 - 12] + norm0 * 12.0
-        for slot in (slot1_pos, slot2_pos):
-            f_vec = tang0 * 10.0
-            s_vec = norm0 * 6.0
-            box_pts = [slot + f_vec + s_vec, slot + f_vec - s_vec, slot - f_vec - s_vec, slot - f_vec + s_vec]
-            pygame.draw.polygon(surf, (215, 218, 225), [(int(p[0]), int(p[1])) for p in box_pts], 1)
+        if hasattr(self.track, "get_starting_grid") and getattr(self.track, "circuit", "") == "shanghai":
+            grid = self.track.get_starting_grid()
+            for slot_key in ("agent_0", "agent_1"):
+                pos_g, hdg_g = grid[slot_key]
+                f_vec = np.array([np.cos(hdg_g), np.sin(hdg_g)]) * CAR_HALF_LEN
+                s_vec = np.array([-np.sin(hdg_g), np.cos(hdg_g)]) * CAR_HALF_WIDTH
+                box_pts = [pos_g + f_vec + s_vec, pos_g + f_vec - s_vec, pos_g - f_vec - s_vec, pos_g - f_vec + s_vec]
+                pygame.draw.polygon(surf, (220, 225, 235), [(int(p[0]), int(p[1])) for p in box_pts], 1)
+                pygame.draw.line(surf, (240, 245, 255), (int((pos_g + f_vec - s_vec)[0]), int((pos_g + f_vec - s_vec)[1])), (int((pos_g + f_vec + s_vec)[0]), int((pos_g + f_vec + s_vec)[1])), 2)
+        else:
+            norm0 = self.track.normals[15]
+            tang0 = self.track.tangents[15]
+            slot1_pos = self.track.centerline[15] - norm0 * 12.0
+            slot2_pos = self.track.centerline[15 - 12] + norm0 * 12.0
+            for slot in (slot1_pos, slot2_pos):
+                f_vec = tang0 * 10.0
+                s_vec = norm0 * 6.0
+                box_pts = [slot + f_vec + s_vec, slot + f_vec - s_vec, slot - f_vec - s_vec, slot - f_vec + s_vec]
+                pygame.draw.polygon(surf, (215, 218, 225), [(int(p[0]), int(p[1])) for p in box_pts], 1)
 
         self._track_surface = surf
 
@@ -662,15 +744,15 @@ class MultiRacingEnv(ParallelEnv):
         import pygame
         from .track import RAY_ANGLES
 
-        W, H = 1180, 660
-        SIDEBAR_X = 850
-        SIDEBAR_W = 330
+        W, H = 1280, 720
+        SIDEBAR_X = 940
+        SIDEBAR_W = 340
 
         if self._screen is None:
             pygame.init()
             if self.render_mode == "human":
                 self._screen = pygame.display.set_mode((W, H))
-                pygame.display.set_caption("Slipstream - Multi-Agent Racing")
+                pygame.display.set_caption("Slipstream - Formula 1 Shanghai Grand Prix")
             else:
                 self._screen = pygame.Surface((W, H))
             self._clock = pygame.time.Clock()
@@ -682,107 +764,136 @@ class MultiRacingEnv(ParallelEnv):
             font_family = "ubuntu" if "ubuntu" in pygame.font.get_fonts() else "dejavusans"
             mono_family = "ubuntumono" if "ubuntumono" in pygame.font.get_fonts() else "monospace"
             self._fonts = {
-                "title": pygame.font.SysFont(font_family, 18, bold=True),
+                "title": pygame.font.SysFont(font_family, 17, bold=True),
                 "sub": pygame.font.SysFont(font_family, 11, bold=True),
                 "body": pygame.font.SysFont(font_family, 12, bold=True),
                 "stat": pygame.font.SysFont(font_family, 13, bold=True),
-                "num": pygame.font.SysFont(mono_family, 13, bold=True),
-                "badge": pygame.font.SysFont(font_family, 11, bold=True),
+                "num": pygame.font.SysFont(mono_family, 12, bold=True),
+                "badge": pygame.font.SysFont(font_family, 10, bold=True),
+                "f1": pygame.font.SysFont(font_family, 14, bold=True),
             }
 
         surf = self._screen
         surf.blit(self._track_surface, (0, 0))
 
-        colors = {"agent_0": (0, 210, 255), "agent_1": (255, 95, 55)}
-        ray_colors = {"agent_0": (0, 165, 215), "agent_1": (225, 115, 48)}
+        team_configs = {
+            "agent_0": {
+                "name": "RED BULL RACING",
+                "car_num": "#1 VER",
+                "primary": (11, 24, 60),
+                "accent": (220, 20, 40),
+                "detail": (255, 215, 0),
+                "ray": (20, 60, 160),
+            },
+            "agent_1": {
+                "name": "SCUDERIA FERRARI",
+                "car_num": "#16 LEC",
+                "primary": (220, 20, 35),
+                "accent": (20, 20, 24),
+                "detail": (255, 220, 0),
+                "ray": (220, 50, 40),
+            },
+        }
 
         for agent in AGENTS:
             s = self._state[agent]
             pos, heading = s["pos"], s["heading"]
-            color = colors[agent]
+            cfg = team_configs[agent]
 
             rays = self.track.ray_distances(pos, heading, MAX_RAY_DIST)
             for a, dist in zip(RAY_ANGLES, rays):
                 angle = heading + a
                 end = pos + dist * np.array([np.cos(angle), np.sin(angle)])
                 pygame.draw.line(
-                    surf, ray_colors[agent],
+                    surf, cfg["ray"],
                     (int(pos[0]), int(pos[1])),
                     (int(end[0]), int(end[1])),
                     1,
                 )
-                pygame.draw.circle(surf, ray_colors[agent], (int(end[0]), int(end[1])), 2)
+                pygame.draw.circle(surf, cfg["ray"], (int(end[0]), int(end[1])), 2)
 
             fwd = np.array([np.cos(heading), np.sin(heading)])
             left = np.array([-fwd[1], fwd[0]])
 
-            for ax in (6.5, -6.5):
-                for lat in (4.2, -4.2):
-                    t_center = pos + fwd * ax + left * lat
-                    t_fl = t_center + fwd * 2.6 + left * 1.2
-                    t_fr = t_center + fwd * 2.6 - left * 1.2
-                    t_rr = t_center - fwd * 2.6 - left * 1.2
-                    t_rl = t_center - fwd * 2.6 + left * 1.2
-                    pygame.draw.polygon(surf, (15, 15, 18), [(int(p[0]), int(p[1])) for p in (t_fl, t_fr, t_rr, t_rl)])
-                    pygame.draw.line(
-                        surf, (140, 140, 150),
-                        (int(t_center[0] - fwd[0]), int(t_center[1] - fwd[1])),
-                        (int(t_center[0] + fwd[0]), int(t_center[1] + fwd[1])),
-                        1,
-                    )
+            for ax, lat in ((6.5, 4.3), (6.5, -4.3), (-6.5, 4.3), (-6.5, -4.3)):
+                hub = pos + fwd * ax + left * lat
+                chassis_pt = pos + fwd * ax + left * (lat * 0.45)
+                pygame.draw.line(surf, (40, 44, 52), (int(chassis_pt[0]), int(chassis_pt[1])), (int(hub[0]), int(hub[1])), 2)
 
-            sp_l = pos + fwd * (CAR_HALF_LEN - 0.2) + left * (CAR_HALF_WIDTH - 0.5)
-            sp_r = pos + fwd * (CAR_HALF_LEN - 0.2) - left * (CAR_HALF_WIDTH - 0.5)
-            pygame.draw.line(surf, (20, 20, 22), (int(sp_l[0]), int(sp_l[1])), (int(sp_r[0]), int(sp_r[1])), 2)
+            for ax, lat, w_len, w_wid in ((6.5, 4.3, 5.2, 2.4), (6.5, -4.3, 5.2, 2.4), (-6.5, 4.3, 5.8, 3.0), (-6.5, -4.3, 5.8, 3.0)):
+                t_center = pos + fwd * ax + left * lat
+                t_fl = t_center + fwd * (w_len * 0.5) + left * (w_wid * 0.5)
+                t_fr = t_center + fwd * (w_len * 0.5) - left * (w_wid * 0.5)
+                t_rr = t_center - fwd * (w_len * 0.5) - left * (w_wid * 0.5)
+                t_rl = t_center - fwd * (w_len * 0.5) + left * (w_wid * 0.5)
+                pygame.draw.polygon(surf, (22, 22, 26), [(int(p[0]), int(p[1])) for p in (t_fl, t_fr, t_rr, t_rl)])
+                pygame.draw.polygon(surf, (10, 10, 12), [(int(p[0]), int(p[1])) for p in (t_fl, t_fr, t_rr, t_rl)], 1)
+                pygame.draw.circle(surf, (190, 195, 205), (int(t_center[0]), int(t_center[1])), 1)
 
-            nose_tip_l = pos + fwd * CAR_HALF_LEN + left * (CAR_HALF_WIDTH * 0.55)
-            nose_tip_r = pos + fwd * CAR_HALF_LEN - left * (CAR_HALF_WIDTH * 0.55)
-            front_arch_l = pos + fwd * (CAR_HALF_LEN * 0.65) + left * CAR_HALF_WIDTH
-            front_arch_r = pos + fwd * (CAR_HALF_LEN * 0.65) - left * CAR_HALF_WIDTH
-            side_pod_l = pos - fwd * (CAR_HALF_LEN * 0.1) + left * (CAR_HALF_WIDTH * 0.95)
-            side_pod_r = pos - fwd * (CAR_HALF_LEN * 0.1) - left * (CAR_HALF_WIDTH * 0.95)
-            rear_arch_l = pos - fwd * (CAR_HALF_LEN * 0.65) + left * CAR_HALF_WIDTH
-            rear_arch_r = pos - fwd * (CAR_HALF_LEN * 0.65) - left * CAR_HALF_WIDTH
-            tail_l = pos - fwd * CAR_HALF_LEN + left * (CAR_HALF_WIDTH * 0.85)
-            tail_r = pos - fwd * CAR_HALF_LEN - left * (CAR_HALF_WIDTH * 0.85)
+            fw_c = pos + fwd * (CAR_HALF_LEN - 0.5)
+            fw_l = fw_c + left * CAR_HALF_WIDTH
+            fw_r = fw_c - left * CAR_HALF_WIDTH
+            pygame.draw.line(surf, (22, 24, 28), (int(fw_l[0]), int(fw_l[1])), (int(fw_r[0]), int(fw_r[1])), 3)
+            pygame.draw.line(surf, cfg["accent"], (int(fw_l[0]), int(fw_l[1])), (int(fw_r[0]), int(fw_r[1])), 1)
+            for endpt in (fw_l, fw_r):
+                ep_f = endpt + fwd * 2.2
+                ep_r = endpt - fwd * 1.5
+                pygame.draw.line(surf, cfg["primary"], (int(ep_f[0]), int(ep_f[1])), (int(ep_r[0]), int(ep_r[1])), 2)
 
-            body = [nose_tip_l, front_arch_l, side_pod_l, rear_arch_l, tail_l, tail_r, rear_arch_r, side_pod_r, front_arch_r, nose_tip_r]
-            pygame.draw.polygon(surf, color, [(int(p[0]), int(p[1])) for p in body])
-            pygame.draw.polygon(surf, (15, 18, 22), [(int(p[0]), int(p[1])) for p in body], 1)
+            rw_c = pos - fwd * (CAR_HALF_LEN - 0.5)
+            rw_l = rw_c + left * (CAR_HALF_WIDTH - 0.6)
+            rw_r = rw_c - left * (CAR_HALF_WIDTH - 0.6)
+            pygame.draw.line(surf, (20, 22, 26), (int(rw_l[0]), int(rw_l[1])), (int(rw_r[0]), int(rw_r[1])), 3)
+            pygame.draw.line(surf, cfg["accent"], (int(rw_l[0]), int(rw_l[1])), (int(rw_r[0]), int(rw_r[1])), 1)
+            for endpt in (rw_l, rw_r):
+                ep_f = endpt + fwd * 1.8
+                ep_r = endpt - fwd * 2.2
+                pygame.draw.line(surf, cfg["primary"], (int(ep_f[0]), int(ep_f[1])), (int(ep_r[0]), int(ep_r[1])), 2)
 
-            stripe_f = pos + fwd * (CAR_HALF_LEN * 0.8)
-            stripe_r = pos - fwd * (CAR_HALF_LEN * 0.85)
-            pygame.draw.line(surf, (20, 24, 30), (int(stripe_f[0]), int(stripe_f[1])), (int(stripe_r[0]), int(stripe_r[1])), 2)
+            chassis_pts = [
+                pos + fwd * CAR_HALF_LEN + left * 0.9,
+                pos + fwd * 4.0 + left * 1.6,
+                pos + fwd * 1.5 + left * 3.5,
+                pos - fwd * 4.5 + left * 3.2,
+                pos - fwd * 7.5 + left * 1.8,
+                pos - fwd * (CAR_HALF_LEN - 0.8) + left * 1.2,
+                pos - fwd * (CAR_HALF_LEN - 0.8) - left * 1.2,
+                pos - fwd * 7.5 - left * 1.8,
+                pos - fwd * 4.5 - left * 3.2,
+                pos + fwd * 1.5 - left * 3.5,
+                pos + fwd * 4.0 - left * 1.6,
+                pos + fwd * CAR_HALF_LEN - left * 0.9,
+            ]
+            pygame.draw.polygon(surf, cfg["primary"], [(int(p[0]), int(p[1])) for p in chassis_pts])
+            pygame.draw.polygon(surf, (15, 18, 22), [(int(p[0]), int(p[1])) for p in chassis_pts], 1)
 
-            cp_f = pos + fwd * 3.5
-            cp_fl = pos + fwd * 2.8 + left * 2.6
-            cp_fr = pos + fwd * 2.8 - left * 2.6
-            cp_rl = pos - fwd * 3.8 + left * 2.8
-            cp_rr = pos - fwd * 3.8 - left * 2.8
-            pygame.draw.polygon(surf, (18, 25, 35), [(int(p[0]), int(p[1])) for p in (cp_f, cp_fl, cp_rl, cp_rr, cp_fr)])
-            pygame.draw.polygon(surf, (90, 160, 220), [(int(p[0]), int(p[1])) for p in (cp_f, cp_fl, cp_rl, cp_rr, cp_fr)], 1)
+            nose_top = pos + fwd * (CAR_HALF_LEN - 0.5)
+            pygame.draw.circle(surf, cfg["detail"], (int(nose_top[0]), int(nose_top[1])), 2)
 
-            helmet_pos = pos - fwd * 0.5
-            pygame.draw.circle(surf, (240, 240, 80), (int(helmet_pos[0]), int(helmet_pos[1])), 2)
+            stripe_f = pos + fwd * 4.5
+            stripe_r = pos - fwd * 6.5
+            pygame.draw.line(surf, cfg["accent"], (int(stripe_f[0]), int(stripe_f[1])), (int(stripe_r[0]), int(stripe_r[1])), 2)
 
-            scoop_pos = pos - fwd * 3.5
-            pygame.draw.circle(surf, (12, 14, 18), (int(scoop_pos[0]), int(scoop_pos[1])), 1)
+            cockpit_f = pos + fwd * 1.5
+            cockpit_r = pos - fwd * 2.2
+            cockpit_pts = [
+                cockpit_f,
+                pos + fwd * 0.4 + left * 1.1,
+                cockpit_r + left * 0.9,
+                cockpit_r - left * 0.9,
+                pos + fwd * 0.4 - left * 1.1,
+            ]
+            pygame.draw.polygon(surf, (14, 16, 20), [(int(p[0]), int(p[1])) for p in cockpit_pts])
+            pygame.draw.polygon(surf, (45, 52, 65), [(int(p[0]), int(p[1])) for p in cockpit_pts], 1)
 
-            wing_l = pos - fwd * (CAR_HALF_LEN - 0.4) + left * (CAR_HALF_WIDTH - 0.2)
-            wing_r = pos - fwd * (CAR_HALF_LEN - 0.4) - left * (CAR_HALF_WIDTH - 0.2)
-            pygame.draw.line(surf, (18, 20, 24), (int(wing_l[0]), int(wing_l[1])), (int(wing_r[0]), int(wing_r[1])), 2)
-            for ep in (wing_l, wing_r):
-                pygame.draw.line(
-                    surf, color,
-                    (int(ep[0] - fwd[0] * 1.5), int(ep[1] - fwd[1] * 1.5)),
-                    (int(ep[0] + fwd[0] * 1.5), int(ep[1] + fwd[1] * 1.5)),
-                    2,
-                )
+            helmet_pos = pos - fwd * 0.6
+            pygame.draw.circle(surf, cfg["detail"], (int(helmet_pos[0]), int(helmet_pos[1])), 2)
 
-            pygame.draw.circle(surf, (255, 255, 230), (int(nose_tip_l[0]), int(nose_tip_l[1])), 2)
-            pygame.draw.circle(surf, (255, 255, 230), (int(nose_tip_r[0]), int(nose_tip_r[1])), 2)
-            pygame.draw.circle(surf, (255, 30, 30), (int(tail_l[0]), int(tail_l[1])), 2)
-            pygame.draw.circle(surf, (255, 30, 30), (int(tail_r[0]), int(tail_r[1])), 2)
+            halo_center = pos + fwd * 0.3
+            pygame.draw.circle(surf, (30, 35, 42), (int(halo_center[0]), int(halo_center[1])), 3, 1)
+
+            tail_light = pos - fwd * (CAR_HALF_LEN - 0.5)
+            pygame.draw.circle(surf, (255, 30, 30), (int(tail_light[0]), int(tail_light[1])), 2)
 
             if self._state[AGENTS[0]]["prev_colliding"]:
                 fl = pos + fwd * CAR_HALF_LEN + left * CAR_HALF_WIDTH
@@ -795,8 +906,8 @@ class MultiRacingEnv(ParallelEnv):
                     2,
                 )
 
-        pygame.draw.rect(surf, (14, 18, 24), (SIDEBAR_X, 0, SIDEBAR_W, H))
-        pygame.draw.line(surf, (36, 46, 62), (SIDEBAR_X, 0), (SIDEBAR_X, H), 2)
+        pygame.draw.rect(surf, (14, 17, 24), (SIDEBAR_X, 0, SIDEBAR_W, H))
+        pygame.draw.line(surf, (36, 44, 60), (SIDEBAR_X, 0), (SIDEBAR_X, H), 2)
 
         font_title = self._fonts["title"]
         font_sub = self._fonts["sub"]
@@ -804,80 +915,101 @@ class MultiRacingEnv(ParallelEnv):
         font_stat = self._fonts["stat"]
         font_num = self._fonts["num"]
         font_badge = self._fonts["badge"]
+        font_f1 = self._fonts["f1"]
 
-        surf.blit(font_title.render("SLIPSTREAM", True, (255, 255, 255)), (SIDEBAR_X + 18, 16))
-        surf.blit(font_sub.render("PHASE 4 GRAND PRIX TELEMETRY", True, (130, 150, 180)), (SIDEBAR_X + 18, 40))
+        pygame.draw.rect(surf, (220, 20, 35), (SIDEBAR_X + 16, 14, 34, 22), border_radius=4)
+        surf.blit(font_f1.render("F1", True, (255, 255, 255)), (SIDEBAR_X + 24, 16))
+        surf.blit(font_title.render("GRAND PRIX", True, (255, 255, 255)), (SIDEBAR_X + 58, 14))
+        surf.blit(font_sub.render("SHANGHAI INTERNATIONAL CIRCUIT", True, (135, 155, 185)), (SIDEBAR_X + 58, 34))
 
-        pygame.draw.rect(surf, (22, 30, 42), (SIDEBAR_X + 18, 62, 140, 24), border_radius=5)
-        surf.blit(font_num.render(f"STEP: {self._step_count:04d}", True, (180, 215, 255)), (SIDEBAR_X + 26, 66))
-        pygame.draw.rect(surf, (22, 30, 42), (SIDEBAR_X + 168, 62, 140, 24), border_radius=5)
-        surf.blit(font_num.render(f"TIME: {self._step_count * 0.05:5.1f}s", True, (180, 215, 255)), (SIDEBAR_X + 176, 66))
+        pygame.draw.rect(surf, (22, 28, 40), (SIDEBAR_X + 16, 58, 148, 24), border_radius=5)
+        surf.blit(font_num.render(f"STEP: {self._step_count:04d}", True, (185, 215, 255)), (SIDEBAR_X + 24, 62))
+        pygame.draw.rect(surf, (22, 28, 40), (SIDEBAR_X + 176, 58, 148, 24), border_radius=5)
+        surf.blit(font_num.render(f"TIME: {self._step_count * DT:5.1f}s", True, (185, 215, 255)), (SIDEBAR_X + 184, 62))
 
         score_0 = self._state["agent_0"]["laps"] + self._state["agent_0"]["progress"]
         score_1 = self._state["agent_1"]["laps"] + self._state["agent_1"]["progress"]
-        rank_0 = "P1 LEADER" if score_0 >= score_1 else "P2 CHASER"
-        rank_1 = "P1 LEADER" if score_1 > score_0 else "P2 CHASER"
-        dist_between = float(np.linalg.norm(self._state["agent_0"]["pos"] - self._state["agent_1"]["pos"]))
+        if score_0 >= score_1:
+            p1_ag, p2_ag = "agent_0", "agent_1"
+        else:
+            p1_ag, p2_ag = "agent_1", "agent_0"
 
-        pygame.draw.rect(surf, (20, 26, 36), (SIDEBAR_X + 18, 96, SIDEBAR_W - 36, 142), border_radius=8)
-        pygame.draw.rect(surf, (0, 190, 235), (SIDEBAR_X + 18, 96, SIDEBAR_W - 36, 142), 2, border_radius=8)
-        pygame.draw.circle(surf, (0, 215, 255), (SIDEBAR_X + 34, 114), 5)
-        surf.blit(font_body.render("AGENT 0 (CYAN)", True, (255, 255, 255)), (SIDEBAR_X + 46, 107))
-        rank_0_col = (0, 230, 140) if "P1" in rank_0 else (200, 210, 225)
-        surf.blit(font_badge.render(rank_0, True, rank_0_col), (SIDEBAR_X + 205, 107))
+        def _fmt(sec: float | None) -> str:
+            if sec is None:
+                return "--:--.---"
+            m = int(sec // 60)
+            s_rem = sec % 60
+            return f"{m:02d}:{s_rem:06.3f}"
 
-        speed_0 = self._state["agent_0"]["speed"]
-        surf.blit(font_stat.render(f"Speed:  {speed_0:5.1f} u/s", True, (240, 245, 255)), (SIDEBAR_X + 30, 132))
-        pygame.draw.rect(surf, (32, 40, 54), (SIDEBAR_X + 30, 152, 234, 7), border_radius=3)
-        bar_w_0 = int(min(max(speed_0, 0.0) / MAX_SPEED, 1.0) * 234)
-        if bar_w_0 > 0:
-            pygame.draw.rect(surf, (0, 210, 255), (SIDEBAR_X + 30, 152, bar_w_0, 7), border_radius=3)
-        surf.blit(font_num.render(f"Laps: {self._state['agent_0']['laps']}   Progress: {self._state['agent_0']['progress']*100:4.1f}%", True, (210, 225, 245)), (SIDEBAR_X + 30, 168))
-        surf.blit(font_num.render(f"Collisions: {self._state['agent_0']['collision_count']}   Respawns: {self._state['agent_0']['respawns']}", True, (210, 225, 245)), (SIDEBAR_X + 30, 190))
-        rsp_str_0 = "INCIDENT - RESPAWNED" if self._state["agent_0"]["respawn"] else "CLEAR - NO INCIDENT"
-        rsp_col_0 = (255, 90, 80) if self._state["agent_0"]["respawn"] else (120, 200, 150)
-        surf.blit(font_stat.render(f"Status: {rsp_str_0}", True, rsp_col_0), (SIDEBAR_X + 30, 212))
+        y_card = 92
+        for rank_str, ag in (("P1", p1_ag), ("P2", p2_ag)):
+            cfg = team_configs[ag]
+            st = self._state[ag]
+            card_border = cfg["primary"] if ag == "agent_0" else cfg["primary"]
 
-        pygame.draw.rect(surf, (20, 26, 36), (SIDEBAR_X + 18, 248, SIDEBAR_W - 36, 142), border_radius=8)
-        pygame.draw.rect(surf, (255, 95, 55), (SIDEBAR_X + 18, 248, SIDEBAR_W - 36, 142), 2, border_radius=8)
-        pygame.draw.circle(surf, (255, 95, 55), (SIDEBAR_X + 34, 266), 5)
-        surf.blit(font_body.render("AGENT 1 (CORAL)", True, (255, 255, 255)), (SIDEBAR_X + 46, 259))
-        rank_1_col = (0, 230, 140) if "P1" in rank_1 else (200, 210, 225)
-        surf.blit(font_badge.render(rank_1, True, rank_1_col), (SIDEBAR_X + 205, 259))
+            pygame.draw.rect(surf, (20, 25, 36), (SIDEBAR_X + 16, y_card, SIDEBAR_W - 32, 146), border_radius=8)
+            pygame.draw.rect(surf, card_border, (SIDEBAR_X + 16, y_card, SIDEBAR_W - 32, 146), 2, border_radius=8)
 
-        speed_1 = self._state["agent_1"]["speed"]
-        surf.blit(font_stat.render(f"Speed:  {speed_1:5.1f} u/s", True, (240, 245, 255)), (SIDEBAR_X + 30, 284))
-        pygame.draw.rect(surf, (32, 40, 54), (SIDEBAR_X + 30, 304, 234, 7), border_radius=3)
-        bar_w_1 = int(min(max(speed_1, 0.0) / MAX_SPEED, 1.0) * 234)
-        if bar_w_1 > 0:
-            pygame.draw.rect(surf, (255, 95, 55), (SIDEBAR_X + 30, 304, bar_w_1, 7), border_radius=3)
-        surf.blit(font_num.render(f"Laps: {self._state['agent_1']['laps']}   Progress: {self._state['agent_1']['progress']*100:4.1f}%", True, (210, 225, 245)), (SIDEBAR_X + 30, 320))
-        surf.blit(font_num.render(f"Collisions: {self._state['agent_1']['collision_count']}   Respawns: {self._state['agent_1']['respawns']}", True, (210, 225, 245)), (SIDEBAR_X + 30, 342))
-        rsp_str_1 = "INCIDENT - RESPAWNED" if self._state["agent_1"]["respawn"] else "CLEAR - NO INCIDENT"
-        rsp_col_1 = (255, 90, 80) if self._state["agent_1"]["respawn"] else (120, 200, 150)
-        surf.blit(font_stat.render(f"Status: {rsp_str_1}", True, rsp_col_1), (SIDEBAR_X + 30, 364))
+            badge_col = (0, 230, 140) if rank_str == "P1" else (220, 225, 235)
+            surf.blit(font_stat.render(rank_str, True, badge_col), (SIDEBAR_X + 28, y_card + 8))
+            surf.blit(font_body.render(f"{cfg['car_num']}  {cfg['name']}", True, (255, 255, 255)), (SIDEBAR_X + 58, y_card + 9))
 
-        pygame.draw.rect(surf, (20, 26, 36), (SIDEBAR_X + 18, 400, SIDEBAR_W - 36, 126), border_radius=8)
-        pygame.draw.rect(surf, (40, 52, 70), (SIDEBAR_X + 18, 400, SIDEBAR_W - 36, 126), 1, border_radius=8)
+            spd = st["speed"]
+            surf.blit(font_stat.render(f"Speed: {spd:5.1f} u/s", True, (240, 245, 255)), (SIDEBAR_X + 28, y_card + 32))
+            pygame.draw.rect(surf, (32, 40, 56), (SIDEBAR_X + 28, y_card + 52, 280, 6), border_radius=3)
+            bar_w = int(min(max(spd, 0.0) / MAX_SPEED, 1.0) * 280)
+            if bar_w > 0:
+                pygame.draw.rect(surf, cfg["detail"], (SIDEBAR_X + 28, y_card + 52, bar_w, 6), border_radius=3)
+
+            lap_str = f"Lap: {st['laps']}   Progress: {st['progress'] * 100:4.1f}%"
+            surf.blit(font_num.render(lap_str, True, (210, 225, 245)), (SIDEBAR_X + 28, y_card + 66))
+
+            last_t = _fmt(st["last_lap_time"])
+            best_t = _fmt(st["best_lap_time"])
+            surf.blit(font_num.render(f"Last: {last_t}   Best: {best_t}", True, (180, 205, 235)), (SIDEBAR_X + 28, y_card + 88))
+
+            if rank_str == "P1":
+                surf.blit(font_badge.render("LEADER", True, (0, 230, 140)), (SIDEBAR_X + 28, y_card + 114))
+            else:
+                gap_s = st.get("gap_to_leader_seconds", 0.0)
+                surf.blit(font_num.render(f"INTERVAL: +{gap_s:5.3f}s", True, (255, 215, 100)), (SIDEBAR_X + 28, y_card + 114))
+                if gap_s < 1.0 and gap_s > 0.0:
+                    pygame.draw.rect(surf, (15, 60, 30), (SIDEBAR_X + 175, y_card + 110, 115, 20), border_radius=4)
+                    surf.blit(font_badge.render("DRS ENABLED (<1s)", True, (80, 245, 140)), (SIDEBAR_X + 183, y_card + 114))
+                else:
+                    pygame.draw.rect(surf, (35, 42, 52), (SIDEBAR_X + 175, y_card + 110, 115, 20), border_radius=4)
+                    surf.blit(font_badge.render("DRS DISABLED", True, (160, 175, 195)), (SIDEBAR_X + 191, y_card + 114))
+
+            y_card += 156
+
+        pygame.draw.rect(surf, (20, 25, 36), (SIDEBAR_X + 16, 404, SIDEBAR_W - 32, 108), border_radius=8)
+        pygame.draw.rect(surf, (40, 50, 70), (SIDEBAR_X + 16, 404, SIDEBAR_W - 32, 108), 1, border_radius=8)
+        surf.blit(font_body.render("RACE CONTROL & TELEMETRY", True, (180, 205, 235)), (SIDEBAR_X + 28, 414))
+
+        gap_sec_disp = self._state[p2_ag].get("gap_to_leader_seconds", 0.0)
+        dist_between = float(np.linalg.norm(self._state[p1_ag]["pos"] - self._state[p2_ag]["pos"]))
+        surf.blit(font_num.render(f"Gap (Time):     +{gap_sec_disp:5.3f} s", True, (225, 235, 250)), (SIDEBAR_X + 28, 436))
+        surf.blit(font_num.render(f"Gap (Distance):  {dist_between:5.1f} u", True, (225, 235, 250)), (SIDEBAR_X + 28, 456))
+        surf.blit(font_num.render(f"Swaps / Moves:   {self._position_swaps}", True, (225, 235, 250)), (SIDEBAR_X + 28, 476))
+
+        pygame.draw.rect(surf, (20, 25, 36), (SIDEBAR_X + 16, 520, SIDEBAR_W - 32, 80), border_radius=8)
+        pygame.draw.rect(surf, (40, 50, 70), (SIDEBAR_X + 16, 520, SIDEBAR_W - 32, 80), 1, border_radius=8)
         is_contact = self._state[AGENTS[0]]["prev_colliding"]
         if is_contact:
-            pygame.draw.rect(surf, (75, 20, 25), (SIDEBAR_X + 28, 412, 238, 26), border_radius=5)
-            surf.blit(font_badge.render("! CONTACT DETECTED !", True, (255, 80, 80)), (SIDEBAR_X + 64, 417))
+            pygame.draw.rect(surf, (75, 20, 25), (SIDEBAR_X + 26, 530, SIDEBAR_W - 52, 24), border_radius=5)
+            surf.blit(font_badge.render("! STEWARDS: CONTACT DETECTED !", True, (255, 90, 90)), (SIDEBAR_X + 46, 535))
         else:
-            pygame.draw.rect(surf, (16, 50, 30), (SIDEBAR_X + 28, 412, 238, 26), border_radius=5)
-            surf.blit(font_badge.render("CLEAN RACING - NO CONTACT", True, (80, 230, 140)), (SIDEBAR_X + 54, 417))
+            pygame.draw.rect(surf, (16, 50, 30), (SIDEBAR_X + 26, 530, SIDEBAR_W - 52, 24), border_radius=5)
+            surf.blit(font_badge.render("TRACK CLEAR - GREEN FLAG", True, (80, 235, 140)), (SIDEBAR_X + 66, 535))
 
-        surf.blit(font_num.render(f"Car Gap:        {dist_between:5.1f} units", True, (220, 230, 245)), (SIDEBAR_X + 30, 448))
         steps_contact = self._state[AGENTS[0]]["steps_in_contact"]
-        surf.blit(font_num.render(f"Contact Steps:  {steps_contact} steps", True, (220, 230, 245)), (SIDEBAR_X + 30, 470))
-        ratio_str = f"{self.track.half_width * 2.0 / (CAR_HALF_WIDTH * 2.0):.2f} : 1"
-        surf.blit(font_num.render(f"Track Ratio:    {ratio_str}", True, (150, 180, 215)), (SIDEBAR_X + 30, 492))
+        surf.blit(font_num.render(f"Contact Steps:   {steps_contact} steps", True, (210, 225, 245)), (SIDEBAR_X + 28, 566))
 
-        pygame.draw.rect(surf, (16, 22, 30), (SIDEBAR_X + 18, 536, SIDEBAR_W - 36, 108), border_radius=8)
-        surf.blit(font_body.render("CONTROLS & SHORTCUTS:", True, (160, 185, 215)), (SIDEBAR_X + 28, 548))
-        surf.blit(font_num.render("ESC / Q : Exit viewer", True, (210, 220, 235)), (SIDEBAR_X + 28, 570))
-        surf.blit(font_num.render("R       : Restart race grid", True, (210, 220, 235)), (SIDEBAR_X + 28, 592))
-        surf.blit(font_sub.render("FPS: 30 LOCK | 1180x660 VIEWPORT", True, (130, 150, 175)), (SIDEBAR_X + 28, 614))
+        pygame.draw.rect(surf, (16, 22, 32), (SIDEBAR_X + 16, 608, SIDEBAR_W - 32, 98), border_radius=8)
+        surf.blit(font_body.render("CONTROLS & SHORTCUTS:", True, (160, 185, 215)), (SIDEBAR_X + 26, 618))
+        surf.blit(font_num.render("ESC / Q : Exit viewer", True, (210, 220, 235)), (SIDEBAR_X + 26, 638))
+        surf.blit(font_num.render("R       : Restart race grid", True, (210, 220, 235)), (SIDEBAR_X + 26, 658))
+        surf.blit(font_sub.render("1280x720 DISPLAY | 30 FPS LOCK", True, (130, 150, 175)), (SIDEBAR_X + 26, 678))
 
         if self.render_mode == "human":
             pygame.event.pump()
