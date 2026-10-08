@@ -11,6 +11,7 @@ from .track import Track, SHANGHAI_TRACK_WIDTH
 from .car import (
     CarState,
     DEFAULT_PARAMS,
+    SHANGHAI_PARAMS,
     DT,
     MAX_SPEED,
     CAR_HALF_WIDTH,
@@ -193,6 +194,7 @@ class MultiRacingEnv(ParallelEnv):
         self._effects = None
         self._camera_overview = False
         self._prev_rear_axle_world = {a: None for a in AGENTS}
+        self.car_params = SHANGHAI_PARAMS if getattr(self.track, "circuit", "") == "shanghai" else DEFAULT_PARAMS
 
     def _compute_transform(self) -> None:
         min_x = float(np.min(self.track.outer[:, 0])) - 25.0
@@ -645,7 +647,7 @@ class MultiRacingEnv(ParallelEnv):
 
             car = CarState(x=s["pos"][0], y=s["pos"][1], heading=s["heading"], speed=s["speed"])
             car, heading_rate = step_physics(
-                car, throttle, steer, DEFAULT_PARAMS, DT, draft_intensity=draft_int
+                car, throttle, steer, getattr(self, "car_params", DEFAULT_PARAMS), DT, draft_intensity=draft_int
             )
             s["pos"][:] = car.x, car.y
             s["heading"] = car.heading
@@ -769,8 +771,9 @@ class MultiRacingEnv(ParallelEnv):
                 vel0 = s0["speed"] * np.array([math.cos(s0["heading"]), math.sin(s0["heading"])])
                 vel1 = s1["speed"] * np.array([math.cos(s1["heading"]), math.sin(s1["heading"])])
                 vel0_new, vel1_new = resolve_collision(s0["pos"], vel0, s1["pos"], vel1, normal)
-                s0["speed"] = float(np.clip(np.linalg.norm(vel0_new), 0.0, MAX_SPEED))
-                s1["speed"] = float(np.clip(np.linalg.norm(vel1_new), 0.0, MAX_SPEED))
+                max_v = getattr(self, "car_params", DEFAULT_PARAMS).max_speed
+                s0["speed"] = float(np.clip(np.linalg.norm(vel0_new), 0.0, max_v))
+                s1["speed"] = float(np.clip(np.linalg.norm(vel1_new), 0.0, max_v))
 
                 pos0_new, pos1_new = resolve_penetration(s0["pos"], s1["pos"], normal, pen)
                 s0["pos"][:] = pos0_new
