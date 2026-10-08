@@ -190,6 +190,7 @@ class MultiRacingEnv(ParallelEnv):
         self._camera = FollowCamera()
         self._tile_cache = TileCache(self.track)
         self._hud = None
+        self._effects = None
         self._camera_overview = False
         self._prev_rear_axle_world = {a: None for a in AGENTS}
 
@@ -461,6 +462,9 @@ class MultiRacingEnv(ParallelEnv):
             if getattr(self, "_tile_cache", None) is not None:
                 self._tile_cache.reset_rubber()
                 self._tile_cache.prebake_spawn_ring(spawn_pos, (self.view_w, self.view_h))
+        if getattr(self, "_effects", None) is not None:
+            self._effects.overtake_frames = 0
+            self._effects.contact_frames = 0
         self._prev_rear_axle_world = {a: None for a in AGENTS}
 
         obs = {a: self._build_obs(a) for a in self.agents}
@@ -1102,7 +1106,22 @@ class MultiRacingEnv(ParallelEnv):
                     2,
                 )
 
+        if self._effects is None:
+            from src.viewer.effects import ViewerEffects
+            self._effects = ViewerEffects((W, H))
+
+        pt_ham_s = to_screen(interp_states["agent_1"]["pos"])
+        pt_ver_s = to_screen(interp_states["agent_0"]["pos"])
         is_contact = self._state[AGENTS[0]]["prev_colliding"]
+        contact_pt_s = (int(round((pt_ham_s[0] + pt_ver_s[0]) * 0.5)), int(round((pt_ham_s[1] + pt_ver_s[1]) * 0.5)))
+        self._effects.on_step(self._current_leader, is_contact, contact_pt_s)
+
+        self._effects.draw_driver_tags(surf, pt_ham_s, pt_ver_s)
+        dist_ham = float(np.linalg.norm(interp_states["agent_1"]["pos"] - self._camera.pos))
+        dist_ver = float(np.linalg.norm(interp_states["agent_0"]["pos"] - self._camera.pos))
+        self._effects.draw_off_screen_arrows(surf, pt_ham_s, dist_ham, (220, 20, 35))
+        self._effects.draw_off_screen_arrows(surf, pt_ver_s, dist_ver, (30, 140, 255))
+        self._effects.draw_banners_and_effects(surf)
         self._hud.draw_bottom_bar(
             surf,
             self._state["agent_1"],
@@ -1149,6 +1168,7 @@ class MultiRacingEnv(ParallelEnv):
         self._pristine_track_surface = None
         self._fonts = None
         self._hud = None
+        self._effects = None
         self._car_sprites_base = None
         self._car_rot_cache = None
         self._car_trails = None
