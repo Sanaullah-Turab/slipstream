@@ -7,6 +7,7 @@ import numpy as np
 class FollowCamera:
     def __init__(self, k: float = 8.0, lookahead_time: float = 0.4):
         self.pos = np.zeros(2, dtype=np.float64)
+        self.smoothed_vel = np.zeros(2, dtype=np.float64)
         self.mode = "auto"
         self.framing_target = "midpoint"
         self.k = k
@@ -15,7 +16,8 @@ class FollowCamera:
     def snap_to(self, target_pos: np.ndarray, target_vel: np.ndarray | None = None) -> None:
         if target_vel is None:
             target_vel = np.zeros(2, dtype=np.float64)
-        self.pos = target_pos.astype(np.float64) + self.lookahead_time * target_vel.astype(np.float64)
+        self.smoothed_vel = target_vel.astype(np.float64)
+        self.pos = target_pos.astype(np.float64) + self.lookahead_time * self.smoothed_vel
 
     def world_to_screen(
         self,
@@ -71,6 +73,12 @@ class FollowCamera:
                 t_pos = pos_ham.copy() if leader_is_ham else pos_ver.copy()
                 t_vel = vel_ham.copy() if leader_is_ham else vel_ver.copy()
 
-        target = t_pos + self.lookahead_time * t_vel
+        if not hasattr(self, "smoothed_vel") or np.all(self.smoothed_vel == 0):
+            self.smoothed_vel = t_vel.astype(np.float64)
+        else:
+            v_alpha = 1.0 - math.exp(-dt * 4.0)
+            self.smoothed_vel = self.smoothed_vel + v_alpha * (t_vel.astype(np.float64) - self.smoothed_vel)
+
+        target = t_pos + self.lookahead_time * self.smoothed_vel
         alpha = 1.0 - math.exp(-dt * self.k)
         self.pos = self.pos + alpha * (target - self.pos)

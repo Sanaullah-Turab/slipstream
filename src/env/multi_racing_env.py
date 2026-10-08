@@ -984,7 +984,7 @@ class MultiRacingEnv(ParallelEnv):
             pos_ver = interp_states["agent_0"]["pos"]
             vel_ham = np.array([math.cos(interp_states["agent_1"]["heading"]), math.sin(interp_states["agent_1"]["heading"])]) * interp_states["agent_1"]["speed"]
             vel_ver = np.array([math.cos(interp_states["agent_0"]["heading"]), math.sin(interp_states["agent_0"]["heading"])]) * interp_states["agent_0"]["speed"]
-            self._camera.update(pos_ham, vel_ham, pos_ver, vel_ver, leader_is_ham, (view_w, view_h), current_zoom, DT / 3.0)
+            self._camera.update(pos_ham, vel_ham, pos_ver, vel_ver, leader_is_ham, (view_w, view_h), current_zoom, DT)
             leader_s = self._state[self._current_leader]["arc_length"]
             self._tile_cache.update_frame(self._camera.pos, (view_w, view_h), leader_s)
             self._tile_cache.render_tiles(surf, self._camera.pos, (view_w, view_h))

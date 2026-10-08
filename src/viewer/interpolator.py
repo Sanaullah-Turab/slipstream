@@ -64,6 +64,8 @@ class StateInterpolator:
         return alpha
 
     def get_interpolated_state(self, agent: str, alpha: float | None = None) -> dict:
+        if self.step_subdivisions <= 1:
+            return self.curr_states[agent].copy()
         if alpha is None:
             alpha = min(1.0, max(0.0, self.frame_in_step / float(self.step_subdivisions)))
 

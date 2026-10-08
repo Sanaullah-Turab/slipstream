@@ -65,13 +65,14 @@ def main():
     size_str = args.size or get_default_window_size()
     w, h = (int(x) for x in size_str.split("x"))
     env = MultiRacingEnv(render_mode="human", window_size=(w, h))
+    if getattr(env, "_interpolator", None) is not None:
+        env._interpolator.step_subdivisions = 1
     model = load_model(args.checkpoint, env)
     obs_dict, _ = env.reset()
     env.render()
 
     clock = pygame.time.Clock()
     frame_idx = 0
-    step_subdiv = 3 if args.fps == 60 else 1
     actions = {}
 
     running = True
