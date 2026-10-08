@@ -773,6 +773,7 @@ class MultiRacingEnv(ParallelEnv):
                         leader_id=0 if leader_agent == AGENTS[0] else 1,
                         lateral_history_leader=leader_s["lateral_history"],
                         follower_lateral=follower_s["lateral"],
+                        lateral_move_threshold=0.10 * (2.0 * self.track.half_width),
                     )
                     if fault == "follower_fault":
                         follower_s["fault_log"]["follower"] += 1
@@ -861,9 +862,10 @@ class MultiRacingEnv(ParallelEnv):
         self._state[leader_ag]["gap_to_leader_seconds"] = 0.0
         self._state[follower_ag]["gap_to_leader_seconds"] = gap_sec
 
-        tac_rewards = self._compute_tactical_rewards()
-        for a in AGENTS:
-            rewards[a] += tac_rewards[a]
+        if self.enable_position_reward:
+            tac_rewards = self._compute_tactical_rewards()
+            for a in AGENTS:
+                rewards[a] += tac_rewards[a]
 
         truncated = False if self.continuous else (self._step_count >= MAX_STEPS)
 
