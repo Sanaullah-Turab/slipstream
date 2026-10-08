@@ -20,6 +20,7 @@ from .car import (
     GRID_SLOT_SPACING,
     GRID_COL_OFFSET,
     KERB_WIDTH,
+    WHEELBASE,
     step_physics,
     DRAFT_CONE_LENGTH,
     DRAFT_CONE_HALF_ANGLE,
@@ -163,6 +164,8 @@ class MultiRacingEnv(ParallelEnv):
         self._track_surface = None
         self._pristine_track_surface = None
         self._fonts = None
+        self._car_sprites_base = None
+        self._car_rot_cache = None
 
     def _compute_transform(self) -> None:
         min_x = float(np.min(self.track.outer[:, 0])) - 25.0
@@ -187,6 +190,90 @@ class MultiRacingEnv(ParallelEnv):
         if self._scale is None:
             self._compute_transform()
         return pt * (self._scale * 2.0) + (self._offset * 2.0)
+
+    def _build_car_sprite(self, agent: str):
+        import pygame
+        cfg = {
+            "agent_0": {
+                "primary": (11, 24, 60),
+                "accent": (220, 20, 40),
+                "detail": (255, 215, 0),
+                "helmet": (255, 140, 20),
+            },
+            "agent_1": {
+                "primary": (220, 20, 35),
+                "accent": (20, 20, 24),
+                "detail": (255, 220, 0),
+                "helmet": (255, 225, 30),
+            },
+        }[agent]
+
+        scale = self._scale
+        c_len_s = CAR_LENGTH * scale
+        c_wid_s = CAR_WIDTH * scale
+        wb_s = WHEELBASE * scale
+
+        l_4x = max(16, int(round(c_len_s * 4.0)))
+        w_4x = max(8, int(round(c_wid_s * 4.0)))
+        pad = 8
+        cw_4x = l_4x + pad
+        ch_4x = w_4x + pad
+        cx, cy = cw_4x / 2.0, ch_4x / 2.0
+        hl = l_4x / 2.0
+        hw = w_4x / 2.0
+        wb = wb_s * 4.0
+
+        surf_4x = pygame.Surface((cw_4x, ch_4x), pygame.SRCALPHA)
+
+        wl_4x = max(4, int(l_4x * 0.28))
+        ww_4x = max(2, int(w_4x * 0.26))
+        for wx in (cx + wb / 2.0, cx - wb / 2.0):
+            for wy in (cy - hw + ww_4x / 2.0, cy + hw - ww_4x / 2.0):
+                w_r = pygame.Rect(int(wx - wl_4x / 2.0), int(wy - ww_4x / 2.0), wl_4x, ww_4x)
+                pygame.draw.rect(surf_4x, (15, 15, 18), w_r, border_radius=1)
+
+        fw_rect = pygame.Rect(int(cx + hl * 0.75), int(cy - hw), max(2, int(hl * 0.25)), int(hw * 2))
+        pygame.draw.rect(surf_4x, cfg["accent"], fw_rect)
+        rw_rect = pygame.Rect(int(cx - hl), int(cy - hw * 0.9), max(2, int(hl * 0.25)), int(hw * 1.8))
+        pygame.draw.rect(surf_4x, cfg["accent"], rw_rect)
+
+        chassis_pts = [
+            (cx + hl, cy),
+            (cx + hl * 0.6, cy - hw * 0.4),
+            (cx + hl * 0.1, cy - hw * 0.75),
+            (cx - hl * 0.6, cy - hw * 0.75),
+            (cx - hl * 0.9, cy - hw * 0.45),
+            (cx - hl * 0.9, cy + hw * 0.45),
+            (cx - hl * 0.6, cy + hw * 0.75),
+            (cx + hl * 0.1, cy + hw * 0.75),
+            (cx + hl * 0.6, cy + hw * 0.4),
+        ]
+        pygame.draw.polygon(surf_4x, cfg["primary"], chassis_pts)
+        pygame.draw.polygon(surf_4x, (12, 14, 18), chassis_pts, 1)
+
+        pygame.draw.circle(surf_4x, cfg["detail"], (int(cx + hl * 0.9), int(cy)), max(1, int(hw * 0.2)))
+        pygame.draw.ellipse(surf_4x, (12, 14, 18), pygame.Rect(int(cx - hl * 0.3), int(cy - hw * 0.35), int(hl * 0.6), int(hw * 0.7)))
+        pygame.draw.circle(surf_4x, (30, 35, 42), (int(cx - hl * 0.05), int(cy)), max(2, int(hw * 0.4)), 1)
+        pygame.draw.circle(surf_4x, cfg["helmet"], (int(cx - hl * 0.1), int(cy)), max(1, int(hw * 0.3)))
+
+        cw_1x = max(4, int(round(cw_4x / 4.0)))
+        ch_1x = max(2, int(round(ch_4x / 4.0)))
+        return pygame.transform.smoothscale(surf_4x, (cw_1x, ch_1x))
+
+    def _get_car_sprite(self, agent: str, heading: float):
+        import pygame
+        if self._car_sprites_base is None:
+            self._car_sprites_base = {
+                "agent_0": self._build_car_sprite("agent_0"),
+                "agent_1": self._build_car_sprite("agent_1"),
+            }
+            self._car_rot_cache = {"agent_0": {}, "agent_1": {}}
+
+        deg = int(round(math.degrees(heading) / 3.0)) * 3 % 360
+        cache = self._car_rot_cache[agent]
+        if deg not in cache:
+            cache[deg] = pygame.transform.rotate(self._car_sprites_base[agent], -deg)
+        return cache[deg]
 
     def observation_space(self, agent: str) -> spaces.Space:
         return self.observation_spaces[agent]
@@ -950,7 +1037,7 @@ class MultiRacingEnv(ParallelEnv):
             },
             "agent_1": {
                 "name": "SCUDERIA FERRARI",
-                "car_num": "#16 LEC",
+                "car_num": "#44 HAM",
                 "primary": (220, 20, 35),
                 "accent": (20, 20, 24),
                 "detail": (255, 220, 0),
@@ -978,92 +1065,15 @@ class MultiRacingEnv(ParallelEnv):
                 )
                 pygame.draw.circle(surf, cfg["ray"], (int(end_s[0]), int(end_s[1])), 2)
 
-            fwd = np.array([np.cos(heading), np.sin(heading)]) * scale
-            left = np.array([-fwd[1], fwd[0]])
-            c_hlen = CAR_HALF_LEN * scale
-            c_hwid = CAR_HALF_WIDTH * scale
-
-            for ax, lat in ((6.5, 4.3), (6.5, -4.3), (-6.5, 4.3), (-6.5, -4.3)):
-                hub = pos_s + fwd * ax + left * lat
-                chassis_pt = pos_s + fwd * ax + left * (lat * 0.45)
-                pygame.draw.line(surf, (40, 44, 52), (int(chassis_pt[0]), int(chassis_pt[1])), (int(hub[0]), int(hub[1])), 2)
-
-            for ax, lat, w_len, w_wid in ((6.5, 4.3, 5.2, 2.4), (6.5, -4.3, 5.2, 2.4), (-6.5, 4.3, 5.8, 3.0), (-6.5, -4.3, 5.8, 3.0)):
-                t_center = pos_s + fwd * ax + left * lat
-                t_fl = t_center + fwd * (w_len * 0.5) + left * (w_wid * 0.5)
-                t_fr = t_center + fwd * (w_len * 0.5) - left * (w_wid * 0.5)
-                t_rr = t_center - fwd * (w_len * 0.5) - left * (w_wid * 0.5)
-                t_rl = t_center - fwd * (w_len * 0.5) + left * (w_wid * 0.5)
-                pygame.draw.polygon(surf, (22, 22, 26), [(int(p[0]), int(p[1])) for p in (t_fl, t_fr, t_rr, t_rl)])
-                pygame.draw.polygon(surf, (10, 10, 12), [(int(p[0]), int(p[1])) for p in (t_fl, t_fr, t_rr, t_rl)], 1)
-                pygame.draw.circle(surf, (190, 195, 205), (int(t_center[0]), int(t_center[1])), 1)
-
-            fw_c = pos_s + fwd * (c_hlen - 0.5 * scale)
-            fw_l = fw_c + left * c_hwid
-            fw_r = fw_c - left * c_hwid
-            pygame.draw.line(surf, (22, 24, 28), (int(fw_l[0]), int(fw_l[1])), (int(fw_r[0]), int(fw_r[1])), max(1, int(round(3 * scale))))
-            pygame.draw.line(surf, cfg["accent"], (int(fw_l[0]), int(fw_l[1])), (int(fw_r[0]), int(fw_r[1])), 1)
-            for endpt in (fw_l, fw_r):
-                ep_f = endpt + fwd * 2.2
-                ep_r = endpt - fwd * 1.5
-                pygame.draw.line(surf, cfg["primary"], (int(ep_f[0]), int(ep_f[1])), (int(ep_r[0]), int(ep_r[1])), max(1, int(round(2 * scale))))
-
-            rw_c = pos_s - fwd * (c_hlen - 0.5 * scale)
-            rw_l = rw_c + left * (c_hwid - 0.6 * scale)
-            rw_r = rw_c - left * (c_hwid - 0.6 * scale)
-            pygame.draw.line(surf, (20, 22, 26), (int(rw_l[0]), int(rw_l[1])), (int(rw_r[0]), int(rw_r[1])), max(1, int(round(3 * scale))))
-            pygame.draw.line(surf, cfg["accent"], (int(rw_l[0]), int(rw_l[1])), (int(rw_r[0]), int(rw_r[1])), 1)
-            for endpt in (rw_l, rw_r):
-                ep_f = endpt + fwd * 1.8
-                ep_r = endpt - fwd * 2.2
-                pygame.draw.line(surf, cfg["primary"], (int(ep_f[0]), int(ep_f[1])), (int(ep_r[0]), int(ep_r[1])), max(1, int(round(2 * scale))))
-
-            chassis_pts = [
-                pos_s + fwd * c_hlen + left * 0.9,
-                pos_s + fwd * 4.0 + left * 1.6,
-                pos_s + fwd * 1.5 + left * 3.5,
-                pos_s - fwd * 4.5 + left * 3.2,
-                pos_s - fwd * 7.5 + left * 1.8,
-                pos_s - fwd * (c_hlen - 0.8 * scale) + left * 1.2,
-                pos_s - fwd * (c_hlen - 0.8 * scale) - left * 1.2,
-                pos_s - fwd * 7.5 - left * 1.8,
-                pos_s - fwd * 4.5 - left * 3.2,
-                pos_s + fwd * 1.5 - left * 3.5,
-                pos_s + fwd * 4.0 - left * 1.6,
-                pos_s + fwd * c_hlen - left * 0.9,
-            ]
-            pygame.draw.polygon(surf, cfg["primary"], [(int(p[0]), int(p[1])) for p in chassis_pts])
-            pygame.draw.polygon(surf, (15, 18, 22), [(int(p[0]), int(p[1])) for p in chassis_pts], 1)
-
-            nose_top = pos_s + fwd * (c_hlen - 0.5 * scale)
-            pygame.draw.circle(surf, cfg["detail"], (int(nose_top[0]), int(nose_top[1])), 2)
-
-            stripe_f = pos_s + fwd * 4.5
-            stripe_r = pos_s - fwd * 6.5
-            pygame.draw.line(surf, cfg["accent"], (int(stripe_f[0]), int(stripe_f[1])), (int(stripe_r[0]), int(stripe_r[1])), max(1, int(round(2 * scale))))
-
-            cockpit_f = pos_s + fwd * 1.5
-            cockpit_r = pos_s - fwd * 2.2
-            cockpit_pts = [
-                cockpit_f,
-                pos_s + fwd * 0.4 + left * 1.1,
-                cockpit_r + left * 0.9,
-                cockpit_r - left * 0.9,
-                pos_s + fwd * 0.4 - left * 1.1,
-            ]
-            pygame.draw.polygon(surf, (14, 16, 20), [(int(p[0]), int(p[1])) for p in cockpit_pts])
-            pygame.draw.polygon(surf, (45, 52, 65), [(int(p[0]), int(p[1])) for p in cockpit_pts], 1)
-
-            helmet_pos = pos_s - fwd * 0.6
-            pygame.draw.circle(surf, cfg["detail"], (int(helmet_pos[0]), int(helmet_pos[1])), 2)
-
-            halo_center = pos_s + fwd * 0.3
-            pygame.draw.circle(surf, (30, 35, 42), (int(halo_center[0]), int(halo_center[1])), 3, 1)
-
-            tail_light = pos_s - fwd * (c_hlen - 0.5 * scale)
-            pygame.draw.circle(surf, (255, 30, 30), (int(tail_light[0]), int(tail_light[1])), 2)
+            car_surf = self._get_car_sprite(agent, heading)
+            rect = car_surf.get_rect(center=(int(pos_s[0]), int(pos_s[1])))
+            surf.blit(car_surf, rect)
 
             if self._state[AGENTS[0]]["prev_colliding"]:
+                c_hlen = CAR_HALF_LEN * scale
+                c_hwid = CAR_HALF_WIDTH * scale
+                fwd = np.array([np.cos(heading), np.sin(heading)]) * scale
+                left = np.array([-fwd[1], fwd[0]])
                 fl = pos_s + fwd * c_hlen + left * c_hwid
                 fr = pos_s + fwd * c_hlen - left * c_hwid
                 rr = pos_s - fwd * c_hlen - left * c_hwid
@@ -1196,4 +1206,6 @@ class MultiRacingEnv(ParallelEnv):
         self._track_surface = None
         self._pristine_track_surface = None
         self._fonts = None
+        self._car_sprites_base = None
+        self._car_rot_cache = None
 
