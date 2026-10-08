@@ -325,11 +325,11 @@ def test_resolve_penetration_center_of_mass_conserved():
 
 
 def test_resolve_penetration_reduces_obb_overlap():
-    pos_a = np.array([21.0, 0.0])
+    pos_a = np.array([25.0, 0.0])
     pos_b = np.array([0.0, 0.0])
     ov, n, pen = obb_overlap(pos_a, 0.0, pos_b, 0.0, HALF_LEN, HALF_W)
     assert ov
-    assert pen == pytest.approx(19.0)
+    assert pen == pytest.approx(15.0)
     p0, p1 = resolve_penetration(pos_a, pos_b, n, pen, epsilon=0.02)
     ov2, _, pen2 = obb_overlap(p0, 0.0, p1, 0.0, HALF_LEN, HALF_W)
     assert ov2

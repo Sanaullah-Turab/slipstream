@@ -32,7 +32,7 @@ from .rewards import (
     DEFAULT_POSITION_G0,
     compute_positional_reward,
 )
-from .collision import obb_overlap, resolve_collision, classify_contact
+from .collision import obb_overlap, resolve_collision, classify_contact, resolve_penetration
 
 AGENTS = ["agent_0", "agent_1"]
 DEFAULT_SPAWN_OFFSET_IDX = 15
@@ -403,7 +403,7 @@ class MultiRacingEnv(ParallelEnv):
                 s["prev_colliding"] = colliding
         else:
             s0, s1 = self._state[AGENTS[0]], self._state[AGENTS[1]]
-            overlapping, normal, _ = obb_overlap(
+            overlapping, normal, pen = obb_overlap(
                 s0["pos"], s0["heading"],
                 s1["pos"], s1["heading"],
                 CAR_HALF_LEN, CAR_HALF_WIDTH,
@@ -452,6 +452,36 @@ class MultiRacingEnv(ParallelEnv):
                 vel0_new, vel1_new = resolve_collision(s0["pos"], vel0, s1["pos"], vel1, normal)
                 s0["speed"] = float(np.clip(np.linalg.norm(vel0_new), 0.0, MAX_SPEED))
                 s1["speed"] = float(np.clip(np.linalg.norm(vel1_new), 0.0, MAX_SPEED))
+
+                pos0_new, pos1_new = resolve_penetration(s0["pos"], s1["pos"], normal, pen)
+                s0["pos"][:] = pos0_new
+                s1["pos"][:] = pos1_new
+
+                ov2, normal2, pen2 = obb_overlap(
+                    s0["pos"], s0["heading"],
+                    s1["pos"], s1["heading"],
+                    CAR_HALF_LEN, CAR_HALF_WIDTH,
+                )
+                if ov2 and pen2 > 0.05:
+                    p0_sub, p1_sub = resolve_penetration(s0["pos"], s1["pos"], normal2, pen2)
+                    s0["pos"][:] = p0_sub
+                    s1["pos"][:] = p1_sub
+
+                for a in AGENTS:
+                    s = self._state[a]
+                    if not s["respawn"]:
+                        ts = self.track.get_track_state(s["pos"])
+                        s["progress"] = ts.progress
+                        s["lateral"] = ts.lateral
+                        s["track_heading"] = ts.track_heading
+                        s["arc_length"] = ts.arc_length
+                        if len(s["lateral_history"]) > 0:
+                            s["lateral_history"][-1] = ts.lateral
+                        if not ts.on_track:
+                            rewards[a] = -5.0
+                            s["respawn"] = True
+                            s["respawns"] += 1
+                            self._respawn(a)
 
             for s in (s0, s1):
                 s["prev_colliding"] = overlapping

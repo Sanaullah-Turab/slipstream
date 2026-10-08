@@ -86,6 +86,23 @@ def resolve_collision(
     return vel_a + delta, vel_b - delta
 
 
+def resolve_penetration(
+    pos_a: np.ndarray,
+    pos_b: np.ndarray,
+    normal: np.ndarray,
+    penetration: float,
+    epsilon: float = 0.02,
+) -> tuple[np.ndarray, np.ndarray]:
+    excess = max(0.0, float(penetration) - epsilon)
+    if excess <= 0.0:
+        return pos_a.copy(), pos_b.copy()
+    norm = float(np.linalg.norm(normal))
+    n = normal / norm if norm > 1e-9 else np.array([1.0, 0.0], dtype=np.float64)
+    shift = 0.5 * excess * n
+    return pos_a + shift, pos_b - shift
+
+
+
 def classify_contact(
     normal: np.ndarray,
     heading_leader: float,
