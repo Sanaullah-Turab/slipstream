@@ -47,7 +47,7 @@ def test_watch_multi_agent_parser():
     args = parser.parse_args([])
     assert "slipstream-p4-1b-7b1372f/final" in args.checkpoint
     assert args.stochastic is False
-    assert args.size == "1600x900"
+    assert args.size is None
     args_1080 = parser.parse_args(["--size", "1920x1080"])
     assert args_1080.size == "1920x1080"
 
