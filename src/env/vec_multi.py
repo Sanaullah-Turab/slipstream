@@ -15,8 +15,8 @@ class TwoCarVecEnv(VecEnv):
     slot 0 -> agent_0 | slot 1 -> agent_1
     """
 
-    def __init__(self, seed: Optional[int] = None) -> None:
-        self.env = MultiRacingEnv()
+    def __init__(self, seed: Optional[int] = None, **env_kwargs: Any) -> None:
+        self.env = MultiRacingEnv(**env_kwargs)
         self.base_seed = seed
         self.episode_count = 0
         obs_space = self.env.observation_space(AGENTS[0])
