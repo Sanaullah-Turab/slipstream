@@ -415,6 +415,12 @@ class MultiRacingEnv(ParallelEnv):
                     "draft_intensity": 0.0,
                     "steer": 0.0,
                     "prev_steer": 0.0,
+                    "throttle": 0.0,
+                    "tyre_temp": 95.0,
+                    "defensive_moves": 0,
+                    "last_defensive_lat": ts.lateral,
+                    "on_kerb": False,
+                    "off_track": False,
                 }
         else:
             slots = [0, self.spawn_offset_idx]
@@ -455,6 +461,12 @@ class MultiRacingEnv(ParallelEnv):
                     "draft_intensity": 0.0,
                     "steer": 0.0,
                     "prev_steer": 0.0,
+                    "throttle": 0.0,
+                    "tyre_temp": 95.0,
+                    "defensive_moves": 0,
+                    "last_defensive_lat": ts.lateral,
+                    "on_kerb": False,
+                    "off_track": False,
                 }
 
         self._position_swaps = 0
@@ -573,6 +585,9 @@ class MultiRacingEnv(ParallelEnv):
             "last_lap_time": s.get("last_lap_time", None),
             "best_lap_time": s.get("best_lap_time", None),
             "gap_to_leader_seconds": s.get("gap_to_leader_seconds", 0.0),
+            "tyre_temp": s.get("tyre_temp", 95.0),
+            "on_kerb": s.get("on_kerb", False),
+            "off_track": s.get("off_track", False),
         }
 
     def _compute_tactical_rewards(self) -> dict[str, float]:
@@ -605,13 +620,33 @@ class MultiRacingEnv(ParallelEnv):
         car_width = 2.0 * CAR_HALF_WIDTH
 
         if 0.0 < d_long < 40.0 and gap_sec < 1.2:
-            if d_lat < car_width and d_long < 22.0:
-                rewards[foll_ag] -= 0.12 * max(0.0, 1.0 - d_long / 22.0)
-            elif d_lat >= car_width and d_lat <= 20.0:
-                rewards[foll_ag] += 0.15 * min((d_lat - car_width) / 5.0, 1.0)
+            if d_lat < car_width * 1.2 and d_long < 25.0:
+                rewards[foll_ag] -= 0.20 * max(0.0, 1.0 - d_long / 25.0)
+            elif d_lat >= car_width * 1.5 and d_lat <= 22.0:
+                rewards[foll_ag] += 0.20 * min((d_lat - car_width) / 5.0, 1.0)
 
         if 0.0 < d_long < 45.0 and gap_sec < 1.5:
             eff_curv = lead_curv if abs(lead_curv) > 0.001 else curv_ahead
+            if abs(eff_curv) <= 0.002:
+                cur_lead_lat = lead_s["lateral"]
+                prev_lead_lat = lead_s.get("last_defensive_lat", cur_lead_lat)
+                if abs(cur_lead_lat - prev_lead_lat) > 2.2:
+                    moves = lead_s.get("defensive_moves", 0) + 1
+                    lead_s["defensive_moves"] = moves
+                    lead_s["last_defensive_lat"] = cur_lead_lat
+                    if moves > 1:
+                        rewards[lead_ag] -= 2.0
+                    else:
+                        rewards[lead_ag] += 0.08
+            else:
+                lead_s["defensive_moves"] = 0
+                lead_s["last_defensive_lat"] = lead_s["lateral"]
+
+            if lead_s.get("throttle", 0.0) <= -0.35 and 0.0 < d_long < 25.0:
+                st_diff = abs(float(lead_s.get("steer", 0.0)) - float(lead_s.get("prev_steer", 0.0)))
+                if st_diff > 0.12:
+                    rewards[lead_ag] -= 2.5
+
             if abs(eff_curv) > 0.001:
                 inside_dir = 1.0 if eff_curv > 0.0 else -1.0
                 if lead_s["lateral"] * inside_dir > 1.5:
@@ -621,17 +656,23 @@ class MultiRacingEnv(ParallelEnv):
                 if lead_s["lateral"] * attack_dir > 1.0:
                     rewards[lead_ag] += 0.08 * min(abs(lead_s["lateral"]) / (self.track.half_width * 0.4), 1.0)
 
+        max_v = getattr(self, "car_params", DEFAULT_PARAMS).max_speed
         for a in AGENTS:
             st = self._state[a]
             ts = self.track.get_track_state(st["pos"])
             c_val = getattr(ts, "curvature", 0.0)
+            spd_ratio = st["speed"] / max(1.0, max_v)
+            fwd_align = max(0.0, math.cos(st["heading"] - st["track_heading"]))
             if abs(c_val) > 0.001:
                 in_dir = 1.0 if c_val > 0.0 else -1.0
-                if st["lateral"] * in_dir > 1.0:
-                    rewards[a] += 0.04 * min(st["lateral"] * in_dir / 10.0, 1.0)
+                inside_offset = st["lateral"] * in_dir
+                if inside_offset > 0.5:
+                    rewards[a] += 0.08 * spd_ratio * min(inside_offset / 10.0, 1.0)
+                if st.get("on_kerb", False) and abs(c_val) > 0.005:
+                    rewards[a] += 0.12 * spd_ratio
             else:
-                if not (a == foll_ag and 0.0 < d_long < 35.0 and gap_sec < 1.2):
-                    rewards[a] += 0.03 * max(0.0, 1.0 - abs(st["lateral"]) / 8.0)
+                cur_st = float(st.get("steer", 0.0))
+                rewards[a] += 0.06 * spd_ratio * fwd_align * max(0.0, 1.0 - abs(cur_st) * 2.0)
 
             cur_st = float(st.get("steer", 0.0))
             prv_st = float(st.get("prev_steer", 0.0))
@@ -695,14 +736,39 @@ class MultiRacingEnv(ParallelEnv):
                 arc_length=s["arc_length"],
             )
 
-            car = CarState(x=s["pos"][0], y=s["pos"][1], heading=s["heading"], speed=s["speed"])
+            lat_abs = abs(s["lateral"])
+            hw = self.track.half_width
+            kw = KERB_WIDTH
+            if lat_abs <= hw - CAR_HALF_WIDTH:
+                surf_grip = 1.0
+                roll_fac = 1.0
+                on_kerb = False
+                off_track = False
+            elif lat_abs <= hw + kw:
+                surf_grip = 0.92
+                roll_fac = 1.8
+                on_kerb = True
+                off_track = False
+            else:
+                surf_grip = 0.35
+                roll_fac = 8.0
+                on_kerb = False
+                off_track = True
+
+            s["on_kerb"] = on_kerb
+            s["off_track"] = off_track
+            s["throttle"] = throttle
+
+            car = CarState(x=s["pos"][0], y=s["pos"][1], heading=s["heading"], speed=s["speed"], tyre_temp=s.get("tyre_temp", 95.0))
             car, heading_rate = step_physics(
-                car, throttle, steer, getattr(self, "car_params", DEFAULT_PARAMS), DT, draft_intensity=draft_int
+                car, throttle, steer, getattr(self, "car_params", DEFAULT_PARAMS), DT,
+                draft_intensity=draft_int, surface_grip=surf_grip, rolling_factor=roll_fac
             )
             s["pos"][:] = car.x, car.y
             s["heading"] = car.heading
             s["speed"] = car.speed
             s["heading_rate"] = heading_rate
+            s["tyre_temp"] = car.tyre_temp
 
             ts = self.track.get_track_state(s["pos"])
             s["progress"] = ts.progress
