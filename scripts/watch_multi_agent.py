@@ -65,11 +65,11 @@ def main():
     size_str = args.size or get_default_window_size()
     w, h = (int(x) for x in size_str.split("x"))
     env = MultiRacingEnv(render_mode="human", window_size=(w, h))
+    env.metadata["render_fps"] = args.fps
     model = load_model(args.checkpoint, env)
     obs_dict, _ = env.reset()
     env.render()
 
-    clock = pygame.time.Clock()
     frame_idx = 0
     actions = {}
     accumulator = 0.0
@@ -117,17 +117,16 @@ def main():
             if not running:
                 break
 
-            dt_real = clock.tick(args.fps) / 1000.0
-            dt_real = min(dt_real, 0.1)
-            accumulator += dt_real * speed_mult
+            dt_frame = (1.0 / float(args.fps)) * speed_mult
+            accumulator += dt_frame
 
-            while accumulator >= sim_dt:
+            while accumulator >= sim_dt - 1e-9:
                 for agent in AGENTS:
                     action, _ = model.predict(obs_dict[agent], deterministic=not args.stochastic)
                     actions[agent] = action
 
                 obs_dict, _, terms, truncs, infos = env.step(actions)
-                accumulator -= sim_dt
+                accumulator = max(0.0, accumulator - sim_dt)
 
                 if any(truncs.values()):
                     for agent in AGENTS:
