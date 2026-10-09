@@ -197,7 +197,7 @@ def evaluate_cross_play(model_p4_path: str, model_p3_path: str, n_episodes: int 
 
 
 def main():
-    m4_path = "checkpoints/clean_racing/shanghai-f1-clean-racing-82391bb/final.zip"
+    m4_path = "checkpoints/f1_tactics/shanghai-f1-smooth-tactics-e2b6007/final.zip"
     m3_path = "checkpoints/multi-A/slipstream-multi-A-84a9ee1/final.zip"
 
     print("Running Criterion 1: Overtaking & Draft Ablation...", flush=True)

@@ -84,7 +84,8 @@ def _warm_start(model: PPO, checkpoint: str) -> None:
                         m_layer.weight.data[:, :w_source.shape[1]] = w_source
                         if w_source.shape[1] < m_layer.weight.data.shape[1]:
                             m_layer.weight.data[:, w_source.shape[1]:] = 0.0
-                        m_layer.weight.data[:, 17:] = 0.0
+                        if source_input_dim < 19:
+                            m_layer.weight.data[:, 17:] = 0.0
                     else:
                         m_layer.weight.data.copy_(s_layer.weight.data)
                 if hasattr(m_layer, "bias") and m_layer.bias is not None:
