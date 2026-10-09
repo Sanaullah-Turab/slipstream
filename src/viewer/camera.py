@@ -8,6 +8,7 @@ class FollowCamera:
     def __init__(self, k: float = 8.0, lookahead_time: float = 0.18):
         self.pos = np.zeros(2, dtype=np.float64)
         self.smoothed_vel = np.zeros(2, dtype=np.float64)
+        self.smoothed_target_pos = np.zeros(2, dtype=np.float64)
         self.mode = "auto"
         self.framing_target = "midpoint"
         self.k = k
@@ -17,6 +18,7 @@ class FollowCamera:
         if target_vel is None:
             target_vel = np.zeros(2, dtype=np.float64)
         self.smoothed_vel = target_vel.astype(np.float64)
+        self.smoothed_target_pos = target_pos.astype(np.float64).copy()
         self.pos = target_pos.astype(np.float64) + self.lookahead_time * self.smoothed_vel
 
     def world_to_screen(
@@ -79,6 +81,12 @@ class FollowCamera:
             v_alpha = 1.0 - math.exp(-dt * 2.5)
             self.smoothed_vel = self.smoothed_vel + v_alpha * (t_vel.astype(np.float64) - self.smoothed_vel)
 
-        target = t_pos + self.lookahead_time * self.smoothed_vel
+        if not hasattr(self, "smoothed_target_pos") or np.all(self.smoothed_target_pos == 0):
+            self.smoothed_target_pos = t_pos.astype(np.float64).copy()
+        else:
+            t_alpha = 1.0 - math.exp(-dt * 4.0)
+            self.smoothed_target_pos = self.smoothed_target_pos + t_alpha * (t_pos.astype(np.float64) - self.smoothed_target_pos)
+
+        target = self.smoothed_target_pos + self.lookahead_time * self.smoothed_vel
         alpha = 1.0 - math.exp(-dt * self.k)
         self.pos = self.pos + alpha * (target - self.pos)

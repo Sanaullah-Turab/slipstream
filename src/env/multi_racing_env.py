@@ -635,7 +635,7 @@ class MultiRacingEnv(ParallelEnv):
 
             cur_st = float(st.get("steer", 0.0))
             prv_st = float(st.get("prev_steer", 0.0))
-            rewards[a] -= 0.02 * ((cur_st - prv_st) ** 2)
+            rewards[a] -= 0.05 * ((cur_st - prv_st) ** 2)
 
         return rewards
 
@@ -675,7 +675,7 @@ class MultiRacingEnv(ParallelEnv):
 
             prev_steer = float(s.get("steer", 0.0))
             if not self.legacy_collision:
-                max_steer_rate = 8.0
+                max_steer_rate = 5.0
                 d_steer = float(np.clip(steer_cmd - prev_steer, -max_steer_rate * DT, max_steer_rate * DT))
                 steer = float(prev_steer + d_steer)
             else:
@@ -913,9 +913,6 @@ class MultiRacingEnv(ParallelEnv):
 
         if truncated:
             self.agents = []
-
-        if self.render_mode == "human":
-            self._render_frame()
 
         obs_agents = AGENTS if truncated else self.agents
         obs = {a: self._build_obs(a) for a in obs_agents}
