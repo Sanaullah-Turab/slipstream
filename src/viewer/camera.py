@@ -5,12 +5,12 @@ import numpy as np
 
 
 class FollowCamera:
-    def __init__(self, k: float = 8.0, lookahead_time: float = 0.18):
+    def __init__(self, k: float = 10.0, lookahead_time: float = 0.15):
         self.pos = np.zeros(2, dtype=np.float64)
         self.smoothed_vel = np.zeros(2, dtype=np.float64)
-        self.smoothed_target_pos = np.zeros(2, dtype=np.float64)
         self.mode = "auto"
         self.framing_target = "midpoint"
+        self.blend_weight = 0.0
         self.k = k
         self.lookahead_time = lookahead_time
 
@@ -18,8 +18,8 @@ class FollowCamera:
         if target_vel is None:
             target_vel = np.zeros(2, dtype=np.float64)
         self.smoothed_vel = target_vel.astype(np.float64)
-        self.smoothed_target_pos = target_pos.astype(np.float64).copy()
         self.pos = target_pos.astype(np.float64) + self.lookahead_time * self.smoothed_vel
+        self.blend_weight = 1.0 if self.framing_target == "leader" else 0.0
 
     def world_to_screen(
         self,
@@ -61,6 +61,13 @@ class FollowCamera:
             if separation < 0.55 * half_ext:
                 self.framing_target = "midpoint"
 
+        target_blend = 1.0 if self.framing_target == "leader" else 0.0
+        if not hasattr(self, "blend_weight"):
+            self.blend_weight = target_blend
+        else:
+            w_alpha = 1.0 - math.exp(-dt * 2.5)
+            self.blend_weight = self.blend_weight + w_alpha * (target_blend - self.blend_weight)
+
         if self.mode == "ham":
             t_pos = pos_ham.astype(np.float64)
             t_vel = vel_ham.astype(np.float64)
@@ -68,25 +75,19 @@ class FollowCamera:
             t_pos = pos_ver.astype(np.float64)
             t_vel = vel_ver.astype(np.float64)
         else:
-            if self.framing_target == "midpoint":
-                t_pos = (pos_ham + pos_ver) * 0.5
-                t_vel = (vel_ham + vel_ver) * 0.5
-            else:
-                t_pos = pos_ham.copy() if leader_is_ham else pos_ver.copy()
-                t_vel = vel_ham.copy() if leader_is_ham else vel_ver.copy()
+            mid_pos = (pos_ham + pos_ver) * 0.5
+            lead_pos = pos_ham.copy() if leader_is_ham else pos_ver.copy()
+            t_pos = (1.0 - self.blend_weight) * mid_pos + self.blend_weight * lead_pos
+            mid_vel = (vel_ham + vel_ver) * 0.5
+            lead_vel = vel_ham.copy() if leader_is_ham else vel_ver.copy()
+            t_vel = (1.0 - self.blend_weight) * mid_vel + self.blend_weight * lead_vel
 
         if not hasattr(self, "smoothed_vel") or np.all(self.smoothed_vel == 0):
             self.smoothed_vel = t_vel.astype(np.float64)
         else:
-            v_alpha = 1.0 - math.exp(-dt * 2.5)
+            v_alpha = 1.0 - math.exp(-dt * 3.5)
             self.smoothed_vel = self.smoothed_vel + v_alpha * (t_vel.astype(np.float64) - self.smoothed_vel)
 
-        if not hasattr(self, "smoothed_target_pos") or np.all(self.smoothed_target_pos == 0):
-            self.smoothed_target_pos = t_pos.astype(np.float64).copy()
-        else:
-            t_alpha = 1.0 - math.exp(-dt * 4.0)
-            self.smoothed_target_pos = self.smoothed_target_pos + t_alpha * (t_pos.astype(np.float64) - self.smoothed_target_pos)
-
-        target = self.smoothed_target_pos + self.lookahead_time * self.smoothed_vel
+        target = t_pos + self.lookahead_time * self.smoothed_vel
         alpha = 1.0 - math.exp(-dt * self.k)
         self.pos = self.pos + alpha * (target - self.pos)

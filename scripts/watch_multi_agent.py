@@ -51,9 +51,9 @@ def build_parser():
     )
     parser.add_argument(
         "--speed",
-        type=int,
-        default=2,
-        help="Simulation steps per rendered frame (default 2).",
+        type=float,
+        default=1.0,
+        help="Playback speed multiplier relative to real time (default 1.0).",
     )
     return parser
 
@@ -65,8 +65,6 @@ def main():
     size_str = args.size or get_default_window_size()
     w, h = (int(x) for x in size_str.split("x"))
     env = MultiRacingEnv(render_mode="human", window_size=(w, h))
-    if getattr(env, "_interpolator", None) is not None:
-        env._interpolator.step_subdivisions = 1
     model = load_model(args.checkpoint, env)
     obs_dict, _ = env.reset()
     env.render()
@@ -74,6 +72,9 @@ def main():
     clock = pygame.time.Clock()
     frame_idx = 0
     actions = {}
+    accumulator = 0.0
+    sim_dt = 0.05
+    speed_mult = max(0.1, float(args.speed))
 
     running = True
     try:
@@ -88,6 +89,7 @@ def main():
                         break
                     elif event.key == pygame.K_r:
                         obs_dict, _ = env.reset()
+                        accumulator = 0.0
                         frame_idx = 0
                         env.render()
                     elif event.key == pygame.K_h:
@@ -105,25 +107,37 @@ def main():
                         env.zoom_in()
                     elif event.key in (pygame.K_MINUS, pygame.K_UNDERSCORE, pygame.K_KP_MINUS):
                         env.zoom_out()
+                    elif event.key == pygame.K_LEFTBRACKET:
+                        speed_mult = max(0.25, round(speed_mult - 0.25, 2))
+                    elif event.key == pygame.K_RIGHTBRACKET:
+                        speed_mult = min(4.0, round(speed_mult + 0.25, 2))
+                    elif event.key == pygame.K_0:
+                        speed_mult = 1.0
 
             if not running:
                 break
 
-            steps_per_frame = max(1, args.speed)
-            for _ in range(steps_per_frame):
+            dt_real = clock.tick(args.fps) / 1000.0
+            dt_real = min(dt_real, 0.1)
+            accumulator += dt_real * speed_mult
+
+            while accumulator >= sim_dt:
                 for agent in AGENTS:
                     action, _ = model.predict(obs_dict[agent], deterministic=not args.stochastic)
                     actions[agent] = action
 
                 obs_dict, _, terms, truncs, infos = env.step(actions)
+                accumulator -= sim_dt
 
                 if any(truncs.values()):
                     for agent in AGENTS:
                         info = infos[agent]
                         print(f"{agent}: laps={info['laps']}  collisions={info['collision_count']}")
 
+            if getattr(env, "_interpolator", None) is not None:
+                env._interpolator.current_alpha = min(1.0, max(0.0, accumulator / sim_dt))
+
             env.render()
-            clock.tick(args.fps)
             frame_idx += 1
 
     except KeyboardInterrupt:

@@ -41,6 +41,7 @@ class StateInterpolator:
 
     def on_sim_step(self, states: dict[str, dict]) -> None:
         self.frame_in_step = 0
+        self.current_alpha = None
         self.prev_states = {
             agent: {
                 "pos": self.curr_states[agent]["pos"].copy(),
@@ -64,9 +65,11 @@ class StateInterpolator:
         return alpha
 
     def get_interpolated_state(self, agent: str, alpha: float | None = None) -> dict:
-        if self.step_subdivisions <= 1:
-            return self.curr_states[agent].copy()
         if alpha is None:
+            alpha = getattr(self, "current_alpha", None)
+        if alpha is None:
+            if self.step_subdivisions <= 1:
+                return self.curr_states[agent].copy()
             alpha = min(1.0, max(0.0, self.frame_in_step / float(self.step_subdivisions)))
 
         p0 = self.prev_states[agent]["pos"]
