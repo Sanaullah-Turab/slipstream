@@ -51,8 +51,8 @@ SHANGHAI_PARAMS = CarParams(
     rolling=0.1,
     wheelbase=WHEELBASE,
     max_steer=0.5,
-    steer_damp=0.55,
-    corner_drag=2.5,
+    steer_damp=0.72,
+    corner_drag=16.0,
 )
 
 
@@ -72,7 +72,7 @@ def step_physics(
 
     steer_eff = steer * params.max_steer * (1.0 - params.steer_damp * v / params.max_speed)
     beta = math.atan(0.5 * math.tan(steer_eff))
-    lat_scrub = getattr(params, "corner_drag", 0.35) * abs(math.sin(beta)) * v * (1.0 + 0.02 * v)
+    lat_scrub = getattr(params, "corner_drag", 0.35) * (math.sin(beta) ** 2) * v * (1.0 + 0.02 * v)
 
     accel = throttle * params.max_accel - eff_drag * v * v - params.rolling * v - lat_scrub
     if v > eff_max_speed:

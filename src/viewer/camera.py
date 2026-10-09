@@ -5,7 +5,7 @@ import numpy as np
 
 
 class FollowCamera:
-    def __init__(self, k: float = 8.0, lookahead_time: float = 0.4):
+    def __init__(self, k: float = 8.0, lookahead_time: float = 0.18):
         self.pos = np.zeros(2, dtype=np.float64)
         self.smoothed_vel = np.zeros(2, dtype=np.float64)
         self.mode = "auto"
@@ -76,7 +76,7 @@ class FollowCamera:
         if not hasattr(self, "smoothed_vel") or np.all(self.smoothed_vel == 0):
             self.smoothed_vel = t_vel.astype(np.float64)
         else:
-            v_alpha = 1.0 - math.exp(-dt * 4.0)
+            v_alpha = 1.0 - math.exp(-dt * 2.5)
             self.smoothed_vel = self.smoothed_vel + v_alpha * (t_vel.astype(np.float64) - self.smoothed_vel)
 
         target = t_pos + self.lookahead_time * self.smoothed_vel

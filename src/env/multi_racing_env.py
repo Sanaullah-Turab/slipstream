@@ -413,6 +413,8 @@ class MultiRacingEnv(ParallelEnv):
                     "lateral_history": [ts.lateral] * LATERAL_HISTORY_LEN,
                     "fault_log": {"follower": 0, "leader": 0, "neutral": 0},
                     "draft_intensity": 0.0,
+                    "steer": 0.0,
+                    "prev_steer": 0.0,
                 }
         else:
             slots = [0, self.spawn_offset_idx]
@@ -451,6 +453,8 @@ class MultiRacingEnv(ParallelEnv):
                     "lateral_history": [ts.lateral] * LATERAL_HISTORY_LEN,
                     "fault_log": {"follower": 0, "leader": 0, "neutral": 0},
                     "draft_intensity": 0.0,
+                    "steer": 0.0,
+                    "prev_steer": 0.0,
                 }
 
         self._position_swaps = 0
@@ -586,20 +590,36 @@ class MultiRacingEnv(ParallelEnv):
         lead_ts = self.track.get_track_state(lead_s["pos"])
         gap_sec = foll_s.get("gap_to_leader_seconds", 0.0)
 
-        lead_curv = getattr(lead_ts, "curvature", 0.0)
-        if gap_sec < 1.5 and abs(lead_curv) > 0.001:
-            inside_dir = 1.0 if lead_curv > 0.0 else -1.0
-            if lead_s["lateral"] * inside_dir > 2.0:
-                rewards[lead_ag] += 0.08 * min(abs(lead_s["lateral"]) / (self.track.half_width * 0.5), 1.0)
-
         fwd_lead = np.array([math.cos(lead_s["heading"]), math.sin(lead_s["heading"])])
         lat_lead = np.array([-fwd_lead[1], fwd_lead[0]])
         delta = foll_s["pos"] - lead_s["pos"]
         d_long = -float(np.dot(delta, fwd_lead))
         d_lat = abs(float(np.dot(delta, lat_lead)))
+        rel_lat_vec = float(np.dot(delta, lat_lead))
 
-        if 0.0 < d_long < 45.0 and gap_sec < 1.0 and 8.0 < d_lat <= 22.0:
-            rewards[foll_ag] += 0.10 * min((d_lat - 8.0) / 6.0, 1.0)
+        lead_idx = self.track.nearest_idx(lead_s["pos"])
+        lookahead_idx = (lead_idx + 80) % len(self.track.centerline)
+        curv_ahead = float(self.track.curvatures[lookahead_idx])
+        lead_curv = getattr(lead_ts, "curvature", 0.0)
+
+        car_width = 2.0 * CAR_HALF_WIDTH
+
+        if 0.0 < d_long < 40.0 and gap_sec < 1.2:
+            if d_lat < car_width and d_long < 22.0:
+                rewards[foll_ag] -= 0.12 * max(0.0, 1.0 - d_long / 22.0)
+            elif d_lat >= car_width and d_lat <= 20.0:
+                rewards[foll_ag] += 0.15 * min((d_lat - car_width) / 5.0, 1.0)
+
+        if 0.0 < d_long < 45.0 and gap_sec < 1.5:
+            eff_curv = lead_curv if abs(lead_curv) > 0.001 else curv_ahead
+            if abs(eff_curv) > 0.001:
+                inside_dir = 1.0 if eff_curv > 0.0 else -1.0
+                if lead_s["lateral"] * inside_dir > 1.5:
+                    rewards[lead_ag] += 0.10 * min(abs(lead_s["lateral"]) / (self.track.half_width * 0.5), 1.0)
+            elif abs(rel_lat_vec) > car_width * 0.8:
+                attack_dir = 1.0 if rel_lat_vec > 0.0 else -1.0
+                if lead_s["lateral"] * attack_dir > 1.0:
+                    rewards[lead_ag] += 0.08 * min(abs(lead_s["lateral"]) / (self.track.half_width * 0.4), 1.0)
 
         for a in AGENTS:
             st = self._state[a]
@@ -610,7 +630,12 @@ class MultiRacingEnv(ParallelEnv):
                 if st["lateral"] * in_dir > 1.0:
                     rewards[a] += 0.04 * min(st["lateral"] * in_dir / 10.0, 1.0)
             else:
-                rewards[a] += 0.03 * max(0.0, 1.0 - abs(st["lateral"]) / 8.0)
+                if not (a == foll_ag and 0.0 < d_long < 35.0 and gap_sec < 1.2):
+                    rewards[a] += 0.03 * max(0.0, 1.0 - abs(st["lateral"]) / 8.0)
+
+            cur_st = float(st.get("steer", 0.0))
+            prv_st = float(st.get("prev_steer", 0.0))
+            rewards[a] -= 0.02 * ((cur_st - prv_st) ** 2)
 
         return rewards
 
@@ -643,10 +668,20 @@ class MultiRacingEnv(ParallelEnv):
                 s["heading"] = ts_start.track_heading
             s["respawn"] = False
             action = actions[agent]
-            steer = float(np.clip(action[0], -1.0, 1.0))
+            steer_cmd = float(np.clip(action[0], -1.0, 1.0))
             throttle = float(np.clip(action[1], -1.0, 1.0))
             draft_int = draft_ints[agent]
             s["draft_intensity"] = draft_int
+
+            prev_steer = float(s.get("steer", 0.0))
+            if not self.legacy_collision:
+                max_steer_rate = 8.0
+                d_steer = float(np.clip(steer_cmd - prev_steer, -max_steer_rate * DT, max_steer_rate * DT))
+                steer = float(prev_steer + d_steer)
+            else:
+                steer = steer_cmd
+            s["prev_steer"] = prev_steer
+            s["steer"] = steer
 
             prev_state = AgentState(
                 pos=s["pos"].copy(),
@@ -923,6 +958,8 @@ class MultiRacingEnv(ParallelEnv):
         s["lateral"] = ts.lateral
         s["track_heading"] = ts.track_heading
         s["arc_length"] = ts.arc_length
+        s["steer"] = 0.0
+        s["prev_steer"] = 0.0
 
     def render(self):
         frame = self._render_frame()
