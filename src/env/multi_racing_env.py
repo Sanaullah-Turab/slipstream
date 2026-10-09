@@ -790,7 +790,7 @@ class MultiRacingEnv(ParallelEnv):
 
             s["arc_length"] = ts.arc_length
 
-            if ts.on_track:
+            if ts.on_track or s.get("on_kerb", False):
                 arc_delta = s["arc_length"] - prev_state.arc_length
                 if arc_delta < -self.track.total_length / 2.0:
                     arc_delta += self.track.total_length
@@ -802,6 +802,9 @@ class MultiRacingEnv(ParallelEnv):
             if len(s["lateral_history"]) > LATERAL_HISTORY_LEN:
                 s["lateral_history"].pop(0)
 
+            lat_abs = abs(s["lateral"])
+            legal_surface = lat_abs <= self.track.half_width + KERB_WIDTH
+
             curr_state = AgentState(
                 pos=s["pos"].copy(),
                 heading=s["heading"],
@@ -809,14 +812,14 @@ class MultiRacingEnv(ParallelEnv):
                 progress=s["progress"],
                 lateral=s["lateral"],
                 track_heading=s["track_heading"],
-                on_track=ts.on_track,
+                on_track=legal_surface,
                 laps=s["laps"],
                 arc_length=s["arc_length"],
             )
 
             reward = compute_reward(curr_state, prev_state, self.track)
 
-            if not ts.on_track:
+            if not legal_surface:
                 reward = -5.0
                 s["respawn"] = True
                 s["respawns"] += 1
