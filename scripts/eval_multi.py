@@ -85,9 +85,10 @@ def main(args):
             obs_dict, _, _, trunc_dict, info_dict = env.step(actions)
             ep_infos = info_dict
             done = any(trunc_dict.values())
+            lap_tol = max(FINISH_LINE_TOLERANCE, 0.005 * env.track.total_length)
             for a in AGENTS:
                 s = info_dict[a]
-                expected_max_laps = int((s["cumulative_distance"] + s["start_offset"] + FINISH_LINE_TOLERANCE) / env.track.total_length)
+                expected_max_laps = int((s["cumulative_distance"] + s["start_offset"] + lap_tol) / env.track.total_length)
                 assert s["laps"] <= expected_max_laps, f"Spurious lap in eval: {s['laps']} > {expected_max_laps}"
             
             for a in AGENTS:

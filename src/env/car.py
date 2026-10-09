@@ -28,6 +28,7 @@ class CarState(NamedTuple):
     y: float
     heading: float
     speed: float
+    tyre_temp: float = 95.0
 
 
 class CarParams(NamedTuple):
@@ -56,6 +57,19 @@ SHANGHAI_PARAMS = CarParams(
 )
 
 
+def compute_tyre_grip(tyre_temp: float) -> float:
+    if tyre_temp < 75.0:
+        return 0.85 + 0.05 * max(0.0, (tyre_temp - 50.0) / 25.0)
+    elif tyre_temp < 90.0:
+        return 0.90 + 0.15 * ((tyre_temp - 75.0) / 15.0)
+    elif tyre_temp <= 110.0:
+        return 1.05
+    elif tyre_temp <= 125.0:
+        return 1.05 - 0.20 * ((tyre_temp - 110.0) / 15.0)
+    else:
+        return max(0.70, 0.85 - 0.15 * min(1.0, (tyre_temp - 125.0) / 25.0))
+
+
 def step_physics(
     state: CarState,
     throttle: float,
@@ -63,22 +77,40 @@ def step_physics(
     params: CarParams = DEFAULT_PARAMS,
     dt: float = DT,
     draft_intensity: float = 0.0,
+    surface_grip: float = 1.0,
+    rolling_factor: float = 1.0,
 ) -> tuple[CarState, float]:
     v = state.speed
     lr = params.wheelbase / 2.0
+    curr_temp = getattr(state, "tyre_temp", 95.0)
+    tyre_grip = compute_tyre_grip(curr_temp)
+    total_grip = surface_grip * tyre_grip
 
     eff_drag = params.drag * (1.0 - DRAFT_DRAG_REDUCTION * draft_intensity)
     eff_max_speed = params.max_speed + DRAFT_SPEED_BOOST * draft_intensity
 
-    steer_eff = steer * params.max_steer * (1.0 - params.steer_damp * v / params.max_speed)
-    beta = math.atan(0.5 * math.tan(steer_eff))
-    lat_scrub = getattr(params, "corner_drag", 0.35) * (math.sin(beta) ** 2) * v * (1.0 + 0.02 * v)
+    long_accel_req = throttle * params.max_accel
+    max_long_grip = total_grip * 32.0
+    long_ratio = min(0.92, abs(long_accel_req) / max(1e-5, max_long_grip))
+    lat_grip_scale = math.sqrt(max(0.05, 1.0 - (long_ratio ** 2)))
 
-    accel = throttle * params.max_accel - eff_drag * v * v - params.rolling * v - lat_scrub
+    steer_eff = steer * params.max_steer * (1.0 - params.steer_damp * v / params.max_speed) * lat_grip_scale
+    beta = math.atan(0.5 * math.tan(steer_eff))
+    lat_scrub = getattr(params, "corner_drag", 0.35) * (math.sin(beta) ** 2) * v * (1.0 + 0.02 * v) / max(0.4, total_grip)
+
+    rolling_drag = params.rolling * v * rolling_factor
+    accel = long_accel_req * min(1.0, total_grip) - eff_drag * v * v - rolling_drag - lat_scrub
     if v > eff_max_speed:
         v_new = max(0.0, min(v, v + accel * dt))
     else:
         v_new = max(0.0, min(v + accel * dt, eff_max_speed))
+
+    lat_slip_v = math.sin(beta) * v
+    q_roll = 3.5 * (v / max(1.0, params.max_speed)) * (0.3 + 0.7 * abs(throttle))
+    q_scrub = 0.8 * (lat_slip_v ** 2)
+    q_brake = 5.0 * max(0.0, -throttle) * (v / max(1.0, params.max_speed))
+    q_cool = (0.012 + 0.00015 * v) * (curr_temp - 30.0)
+    new_temp = max(30.0, min(140.0, curr_temp + (q_roll + q_scrub + q_brake - q_cool) * dt))
 
     heading_rate = (v_new / lr) * math.sin(beta)
 
@@ -89,6 +121,7 @@ def step_physics(
             y=state.y + v_new * math.sin(theta + beta) * dt,
             heading=theta + heading_rate * dt,
             speed=v_new,
+            tyre_temp=new_temp,
         ),
         heading_rate,
     )

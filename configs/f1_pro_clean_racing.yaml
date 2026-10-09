@@ -1,0 +1,30 @@
+env:
+  render_mode: null
+  contact_penalty: -25.0
+  contact_step_penalty: -0.5
+
+ppo:
+  policy: MlpPolicy
+  n_steps: 2048
+  batch_size: 64
+  n_epochs: 10
+  learning_rate: 1.0e-4
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.01
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  device: cpu
+
+train:
+  total_timesteps: 300_000
+  seed: 42
+  checkpoint_freq: 25_000
+  eval_freq: 20_000
+  eval_episodes: 5
+  freeze_actor_steps: 0
+  checkpoint_dir: checkpoints/f1_pro_clean
+  run_name: shanghai-f1-pro-clean-racing
+  group: f1-pro-clean
+  tags: [shanghai, f1, pro-dynamics, zero-contact, thermal-grip, single-move-defending]

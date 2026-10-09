@@ -163,7 +163,9 @@ def main() -> None:
         sync_tensorboard=True,
     )
 
-    env = TwoCarVecEnv(seed=seed)
+    env_cfg = dict(cfg.get("env", {}))
+    env_cfg.pop("render_mode", None)
+    env = TwoCarVecEnv(seed=seed, **env_cfg)
     policy = ppo_cfg.pop("policy")
     model = PPO(policy, env, **ppo_cfg, seed=seed, verbose=1, tensorboard_log="runs")
 
@@ -179,6 +181,7 @@ def main() -> None:
         MultiEvalCallback(
             eval_freq=train_cfg["eval_freq"],
             n_episodes=train_cfg["eval_episodes"],
+            env_kwargs=env_cfg,
         ),
         TrainingEpisodeCallback(
             log_path=ckpt_dir / "training_episodes.json",

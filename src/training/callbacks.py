@@ -155,13 +155,14 @@ def batch_predict(model, obs_dict: dict, agents: list[str], deterministic: bool 
 class MultiEvalCallback(BaseCallback):
     GAP_EPS_FRAC = 0.005
 
-    def __init__(self, eval_freq: int, n_episodes: int):
+    def __init__(self, eval_freq: int, n_episodes: int, env_kwargs: dict | None = None):
         super().__init__()
         self.eval_freq = eval_freq
         self.n_episodes = n_episodes
+        self.env_kwargs = env_kwargs or {}
 
     def _on_training_start(self) -> None:
-        self._eval_env = _MultiRacingEnv()
+        self._eval_env = _MultiRacingEnv(**self.env_kwargs)
         self._track_length = self._eval_env.track.total_length
         self._gap_eps = self.GAP_EPS_FRAC * self._track_length
 

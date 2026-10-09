@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 import numpy as np
@@ -8,14 +9,13 @@ from gymnasium import spaces
 
 from .track import Track, RAY_ANGLES
 from .rewards import compute_reward, AgentState
-from .car import CarState, DEFAULT_PARAMS, DT, MAX_SPEED, step_physics
+from .car import CarState, DEFAULT_PARAMS, SHANGHAI_PARAMS, DT, MAX_SPEED, CAR_HALF_WIDTH, KERB_WIDTH, step_physics
 
 MAX_STEPS = 2000
 MAX_HEADING_RATE = 2.0
 
-# --- Observation ---
 MAX_RAY_DIST = 250.0
-_OBS_DIM = 11  # speed | sin_err cos_err | lateral | progress | heading_rate | 5 rays
+_OBS_DIM = 11
 
 
 class RacingEnv(gym.Env):
@@ -25,6 +25,7 @@ class RacingEnv(gym.Env):
         super().__init__()
         self.track = Track()
         self.render_mode = render_mode
+        self.car_params = SHANGHAI_PARAMS
 
         self.observation_space = spaces.Box(
             low=-1.0, high=1.0, shape=(_OBS_DIM,), dtype=np.float32
@@ -45,6 +46,8 @@ class RacingEnv(gym.Env):
         self._track_heading = 0.0
         self._arc_length = 0.0
         self._heading_rate = 0.0
+        self._tyre_temp = 95.0
+        self._prev_steer = 0.0
 
         self._screen = None
         self._clock = None
@@ -59,6 +62,8 @@ class RacingEnv(gym.Env):
         self._step_count = 0
         self._laps = 0
         self._heading_rate = 0.0
+        self._tyre_temp = 95.0
+        self._prev_steer = 0.0
         ts = self.track.get_track_state(self._pos)
         self._progress = ts.progress
         self._lateral = ts.lateral
@@ -82,11 +87,31 @@ class RacingEnv(gym.Env):
             arc_length=self._arc_length,
         )
 
-        car = CarState(x=self._pos[0], y=self._pos[1], heading=self._heading, speed=self._speed)
-        car, self._heading_rate = step_physics(car, throttle, steer, DEFAULT_PARAMS, DT)
+        lat_abs = abs(self._lateral)
+        hw = self.track.half_width
+        kw = KERB_WIDTH
+        if lat_abs <= hw - CAR_HALF_WIDTH:
+            surf_grip = 1.0
+            roll_fac = 1.0
+            on_kerb = False
+        elif lat_abs <= hw + kw:
+            surf_grip = 0.92
+            roll_fac = 1.8
+            on_kerb = True
+        else:
+            surf_grip = 0.35
+            roll_fac = 8.0
+            on_kerb = False
+
+        car = CarState(x=self._pos[0], y=self._pos[1], heading=self._heading, speed=self._speed, tyre_temp=getattr(self, "_tyre_temp", 95.0))
+        car, self._heading_rate = step_physics(
+            car, throttle, steer, getattr(self, "car_params", SHANGHAI_PARAMS), DT,
+            surface_grip=surf_grip, rolling_factor=roll_fac
+        )
         self._pos[:] = car.x, car.y
         self._heading = car.heading
         self._speed = car.speed
+        self._tyre_temp = car.tyre_temp
         self._step_count += 1
 
         ts = self.track.get_track_state(self._pos)
@@ -99,6 +124,7 @@ class RacingEnv(gym.Env):
 
         self._arc_length = ts.arc_length
 
+        legal_surface = abs(ts.lateral) <= hw + kw
         curr_state = AgentState(
             pos=self._pos.copy(),
             heading=self._heading,
@@ -106,13 +132,34 @@ class RacingEnv(gym.Env):
             progress=self._progress,
             lateral=self._lateral,
             track_heading=self._track_heading,
-            on_track=ts.on_track,
+            on_track=legal_surface,
             laps=self._laps,
             arc_length=self._arc_length,
         )
 
         reward = compute_reward(curr_state, prev_state, self.track)
-        terminated = not ts.on_track
+
+        c_val = getattr(ts, "curvature", 0.0)
+        max_v = getattr(self, "car_params", SHANGHAI_PARAMS).max_speed
+        spd_ratio = self._speed / max(1.0, max_v)
+        fwd_align = max(0.0, math.cos(self._heading - self._track_heading))
+
+        if abs(c_val) > 0.001:
+            in_dir = 1.0 if c_val > 0.0 else -1.0
+            inside_offset = self._lateral * in_dir
+            if inside_offset > 0.5:
+                reward += 0.15 * spd_ratio * min(inside_offset / 10.0, 1.0)
+            if on_kerb and abs(c_val) > 0.005:
+                reward += 0.25 * spd_ratio
+        else:
+            reward += 0.12 * spd_ratio * fwd_align * max(0.0, 1.0 - abs(steer) * 2.0)
+
+        reward -= 0.05 * ((steer - getattr(self, "_prev_steer", steer)) ** 2)
+        self._prev_steer = steer
+
+        terminated = not legal_surface
+        if terminated:
+            reward -= 5.0
         truncated = self._step_count >= MAX_STEPS
 
         if self.render_mode == "human":
@@ -125,7 +172,9 @@ class RacingEnv(gym.Env):
             truncated,
             {"laps": self._laps, "progress": self._progress, "speed": self._speed,
              "cumulative_distance": self._laps * self.track.total_length + self._progress * self.track.total_length,
-             "lateral_ratio": abs(self._lateral) / self.track.half_width},
+             "lateral_ratio": abs(self._lateral) / self.track.half_width,
+             "tyre_temp": self._tyre_temp,
+             "on_kerb": on_kerb},
         )
 
     def _build_obs(self) -> np.ndarray:
@@ -135,9 +184,10 @@ class RacingEnv(gym.Env):
             self.track.ray_distances(self._pos, self._heading, MAX_RAY_DIST)
             / MAX_RAY_DIST
         )
+        max_v = getattr(self, "car_params", SHANGHAI_PARAMS).max_speed
         return np.array(
             [
-                self._speed / MAX_SPEED,
+                self._speed / max_v,
                 np.sin(heading_err),
                 np.cos(heading_err),
                 lateral_norm,
@@ -177,7 +227,6 @@ class RacingEnv(gym.Env):
         pygame.draw.lines(surf, (210, 210, 210), True, outer, 2)
         pygame.draw.lines(surf, (210, 210, 210), True, inner, 2)
 
-        # Dashed centerline
         cl = self.track.centerline
         for i in range(0, len(cl) - 8, 16):
             pygame.draw.line(
@@ -187,7 +236,6 @@ class RacingEnv(gym.Env):
                 1,
             )
 
-        # Ray lines
         rays = self.track.ray_distances(self._pos, self._heading, MAX_RAY_DIST)
         for a, dist in zip(RAY_ANGLES, rays):
             angle = self._heading + a
@@ -199,7 +247,6 @@ class RacingEnv(gym.Env):
                 1,
             )
 
-        # Vehicle triangle
         sz = 9
         fwd = np.array([np.cos(self._heading), np.sin(self._heading)])
         left = np.array([-fwd[1], fwd[0]])
@@ -212,7 +259,6 @@ class RacingEnv(gym.Env):
             (int(br[0]), int(br[1])),
         ])
 
-        # HUD
         font = pygame.font.SysFont("monospace", 14)
         for i, text in enumerate([
             f"Speed:    {self._speed:6.1f}",
